@@ -1,0 +1,5 @@
+takeoff_hold:
+  ros__parameters:
+    takeoff_height: 2.5
+    ascent_velocity: 1.0
+    delta_position: 0.25
