@@ -1,0 +1,15 @@
+drogue_approach:
+  ros__parameters:
+    takeoff_height: 2.5
+    hold_duration: 3.0
+    drogue_hold_distance: 1.0
+    drogue_delta_position: 0.25
+    drogue_delta_velocity: 0.25
+    drogue_target_timeout: 3.0
+    drogue_pid_kp: 0.8
+    drogue_pid_ki: 0.02
+    drogue_pid_kd: 0.3
+    drogue_pid_max_velocity: 1.0
+    drogue_pid_integral_limit: 0.5
+    drogue_pid_kp_z: 0.6
+    drogue_pid_max_velocity_z: 0.6

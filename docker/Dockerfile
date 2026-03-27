@@ -28,6 +28,17 @@ RUN curl -fL -o /tmp/foxglove-studio.deb \
     #&& make
 
 
+# ── YOLO / Drogue Detection Dependencies ──
+RUN apt-get update && apt-get -y --quiet --no-install-recommends install \
+    ros-${ROS_DISTRO}-vision-msgs \
+    ros-${ROS_DISTRO}-cv-bridge \
+    python3-pip \
+    && apt-get -y autoremove \
+    && apt-get clean autoclean \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN pip3 install --no-cache-dir ultralytics
+
 # Create dir and set ownership to user 1000:1000
 RUN mkdir -p ${XDG_RUNTIME_DIR} && chown 1000:1000 ${XDG_RUNTIME_DIR} && chmod 700 ${XDG_RUNTIME_DIR}
 
