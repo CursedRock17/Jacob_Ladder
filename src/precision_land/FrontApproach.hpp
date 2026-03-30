@@ -1,6 +1,7 @@
 #pragma once
 
 #include <px4_ros2/components/mode.hpp>
+#include <px4_ros2/components/mode_executor.hpp>
 #include <px4_ros2/control/setpoint_types/experimental/trajectory.hpp>
 #include <px4_ros2/odometry/attitude.hpp>
 #include <px4_ros2/odometry/local_position.hpp>
@@ -97,6 +98,28 @@ private:
 
 	float _param_kp_z = 1.0f;
 	float _param_max_velocity_z = 1.5f;
+};
+
+// Executor: arms -> PX4 internal takeoff -> schedules FrontApproach mode
+class FrontApproachExecutor : public px4_ros2::ModeExecutorBase
+{
+public:
+	FrontApproachExecutor(rclcpp::Node& node, px4_ros2::ModeBase& owned_mode);
+
+	enum class State {
+		Arming,
+		TakingOff,
+		Approaching,
+	};
+
+	void onActivate() override;
+	void onDeactivate(DeactivateReason reason) override;
+
+private:
+	void runState(State state, px4_ros2::Result result);
+
+	rclcpp::Node& _node;
+	float _param_takeoff_height = 2.5f;
 };
 
 } // namespace precision_land

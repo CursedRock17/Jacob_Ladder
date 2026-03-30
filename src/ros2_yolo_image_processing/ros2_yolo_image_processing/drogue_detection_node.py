@@ -1,7 +1,7 @@
 import rclpy
 from rclpy.node import Node
 from rclpy.executors import MultiThreadedExecutor
-from rclpy.qos import qos_profile_default, qos_profile_sensor_data
+from rclpy.qos import qos_profile_system_default, qos_profile_sensor_data
 
 # MSG Libraries
 from sensor_msgs.msg import Image
@@ -38,7 +38,7 @@ class DrogueDetectionNode(Node):
         super().__init__('drogue_detection_node')
 
         # Find our local Pytorch Neural Network, then establish the tensors
-        self.MODEL_FILEPATH = './models/ranging_DNN_v8n.pt'
+        self.MODEL_FILEPATH = '/home/cursedrock17/Documents/Electrical/Matrix_Lab/jacob_drone_ws/src/Jacob_Ladder/src/drogue_flight/models/best.pt'
         self.IMGSZ = 416
         self.CONF = 0.25
         self.IOU = 0.45
@@ -60,7 +60,7 @@ class DrogueDetectionNode(Node):
 
         # Create a valid Quality of Service
         sensor_qos = qos_profile_sensor_data
-        default_qos = qos_profile_default
+        default_qos = qos_profile_system_default
 
         # Create ROS 2 Parameters to handle some requirements on finding the drogue
         self.confidence_param = self.declare_parameter('min_score_thresh', self.CONF)

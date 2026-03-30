@@ -1,6 +1,6 @@
 import rclpy
 from rclpy.node import Node
-from rclpy.qos import qos_profile_default
+from rclpy.qos import qos_profile_system_default
 from rclpy.executors import MultiThreadedExecutor
 
 # MSG Libraries
@@ -44,7 +44,7 @@ class PoseEstimationNode(Node):
         self.CLASS_DROGUE = "Drogue"
 
         # Create a valid Quality of Service
-        default_qos = qos_profile_default
+        default_qos = qos_profile_system_default
         # Create our Subscription to the array of Bounding Boxes
         self.bbox_subscriber = self.create_subscription(
             Detection2DArray, 'detections', self.detections_callback, qos_profile=default_qos)

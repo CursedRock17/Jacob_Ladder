@@ -184,11 +184,6 @@ New:
     EKF2_OF_POS_X, EKF2_OF_POS_Y and EKF2_OF_POS_Z can be set to account for the offset of the Ark Flow from the vehicle centre of gravity.
     MPC_XY_P: 0.5
 
-### Jacob Ladder Address
-jacob@jacob-jetson
-password: projectladder (everywhere)
-ip:  10.42.0.1
-
 
 ### Scripts to Run
 Blank Offboard Mode

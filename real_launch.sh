@@ -4,13 +4,13 @@ container_name="jacob_drone"
 user="user"
 
 # Tab names
-tab_names=("PX4-SITL" "DDS-Agent" "RQT-Image" "Translation-Node" "Aruco-Tracker" "Precision-Land")
+tab_names=("DDS-Agent" "Aruco-Tracker" "Precision-Land")
 
 # Commands to run in each tab
 commands=(
-    "cd /home/cursedrock17/Documents/Electrical/Matrix_Lab/jacob_drone_ws/src/PX4-Autopilot && make px4_sitl gz_x500_mono_cam_down_aruco"
     "cd /home/cursedrock17/Documents/Electrical/Matrix_Lab/jacob_drone_ws/src/Jacob_Ladder && source install/setup.bash && MicroXRCEAgent udp4 -p 8888"
-    #"cd /home/cursedrock17/Documents/Electrical/Matrix_Lab/jacob_drone_ws/src/Jacob_Ladder && source install/setup.bash && rviz2"
+    "cd /home/cursedrock17/Documents/Electrical/Matrix_Lab/jacob_drone_ws/src/Jacob_Ladder && source install/setup.bash && ros2 launch aruco_tracker front_camera_aruco.launch.py"
+    "cd /home/cursedrock17/Documents/Electrical/Matrix_Lab/jacob_drone_ws/src/Jacob_Ladder && source install/setup.bash && ros2 launch precision_land takeoff_hold.launch.py"
 )
 
 # Start gnome-terminal with the first tab

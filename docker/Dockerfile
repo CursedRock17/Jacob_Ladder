@@ -37,7 +37,7 @@ RUN apt-get update && apt-get -y --quiet --no-install-recommends install \
     && apt-get clean autoclean \
     && rm -rf /var/lib/apt/lists/*
 
-RUN pip3 install --no-cache-dir ultralytics
+RUN python3 -m pip install --ignore-installed ultralytics
 
 # Create dir and set ownership to user 1000:1000
 RUN mkdir -p ${XDG_RUNTIME_DIR} && chown 1000:1000 ${XDG_RUNTIME_DIR} && chmod 700 ${XDG_RUNTIME_DIR}

@@ -28,7 +28,7 @@ for i in "${!commands[@]}"; do
 
     # Add delay only for Precision-Land
     if [ $i -eq 4 ]; then
-        docker_cmd="docker exec -it --user ${user} ${container_name} bash -c \"sleep 15; ${commands[$i]}\""
+        docker_cmd="docker exec -it --user ${user} ${container_name} bash -c \"sleep 5; ${commands[$i]}\""
     else
         docker_cmd="docker exec -it --user ${user} ${container_name} bash -c \"${commands[$i]}\""
     fi

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <px4_ros2/components/mode.hpp>
+#include <px4_ros2/components/mode_executor.hpp>
 #include <px4_ros2/control/setpoint_types/experimental/trajectory.hpp>
 #include <px4_ros2/odometry/attitude.hpp>
 #include <px4_ros2/odometry/local_position.hpp>
@@ -50,7 +51,6 @@ private:
 		FrontSearch,
 		FrontApproach,
 		PrecisionApproach,
-		PrecisionDescend,
 		Finished
 	};
 
@@ -65,8 +65,6 @@ private:
 
 	bool targetExpired(const rclcpp::Time& now, const ArucoTag& tag) const;
 	bool positionReached(const Eigen::Vector3f& target) const;
-
-	Eigen::Vector2f calculatePrecisionVelocityXY();
 
 	void resetFrontController();
 	void switchToState(State state);
@@ -93,17 +91,16 @@ private:
 	Eigen::Quaterniond _front_optical_to_body;
 	Eigen::Quaterniond _down_optical_to_body;
 
+	// Precision approach latched target
+	Eigen::Vector3f _precision_target = Eigen::Vector3f::Zero();
+
 	// Front PID controller state
 	Eigen::Vector2d _front_integral_xy = Eigen::Vector2d::Zero();
 	Eigen::Vector2d _front_prev_error_xy = Eigen::Vector2d::Zero();
 	bool _front_has_prev_error = false;
 
-	// Precision descend integrator
-	float _precision_integral_x = 0.f;
-	float _precision_integral_y = 0.f;
-
 	// Parameters
-	float _param_front_hold_distance = 1.0f;
+	float _param_front_hold_distance = 2.0f;
 	float _param_front_target_timeout = 3.0f;
 	float _param_front_kp = 0.8f;
 	float _param_front_ki = 0.02f;
@@ -115,11 +112,31 @@ private:
 
 	float _param_precision_target_timeout = 3.0f;
 	float _param_precision_descent_vel = 0.5f;
-	float _param_precision_kp = 1.5f;
-	float _param_precision_ki = 0.0f;
-	float _param_precision_max_vel = 1.0f;
 	float _param_precision_delta_position = 0.25f;
 	float _param_precision_delta_velocity = 0.25f;
+};
+
+// Executor: arms -> PX4 internal takeoff -> schedules FrontApproachPrecisionLand mode
+class FrontApproachPrecisionLandExecutor : public px4_ros2::ModeExecutorBase
+{
+public:
+	FrontApproachPrecisionLandExecutor(rclcpp::Node& node, px4_ros2::ModeBase& owned_mode);
+
+	enum class State {
+		Arming,
+		TakingOff,
+		Approaching,
+		Disarming,
+	};
+
+	void onActivate() override;
+	void onDeactivate(DeactivateReason reason) override;
+
+private:
+	void runState(State state, px4_ros2::Result result);
+
+	rclcpp::Node& _node;
+	float _param_takeoff_height = 2.5f;
 };
 
 } // namespace precision_land

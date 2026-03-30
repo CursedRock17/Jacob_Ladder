@@ -10,7 +10,7 @@ namespace precision_land
 {
 
 FrontApproachPrecisionLandCombined::FrontApproachPrecisionLandCombined(rclcpp::Node& node)
-	: ModeBase(node, ModeBase::Settings{kFrontToPrecisionModeName})
+	: ModeBase(node, ModeBase::Settings{kFrontToPrecisionModeName, false})
 	, _node(node)
 {
 	setSkipMessageCompatibilityCheck();
@@ -24,10 +24,6 @@ FrontApproachPrecisionLandCombined::FrontApproachPrecisionLandCombined(rclcpp::N
 		"/front/target_pose", qos,
 		std::bind(&FrontApproachPrecisionLandCombined::frontTargetCallback, this, std::placeholders::_1));
 
-	_down_target_sub = _node.create_subscription<geometry_msgs::msg::PoseStamped>(
-		"/target_pose", qos,
-		std::bind(&FrontApproachPrecisionLandCombined::downTargetCallback, this, std::placeholders::_1));
-
 	_land_detected_sub = _node.create_subscription<px4_msgs::msg::VehicleLandDetected>(
 		"/fmu/out/vehicle_land_detected", qos,
 		std::bind(&FrontApproachPrecisionLandCombined::landDetectedCallback, this, std::placeholders::_1));
@@ -37,12 +33,6 @@ FrontApproachPrecisionLandCombined::FrontApproachPrecisionLandCombined(rclcpp::N
 			1, 0, 0,
 			0, 1, 0;
 	_front_optical_to_body = Eigen::Quaterniond(front_matrix);
-
-	Eigen::Matrix3d down_matrix;
-	down_matrix << 0, -1, 0,
-			 1, 0, 0,
-			 0, 0, 1;
-	_down_optical_to_body = Eigen::Quaterniond(down_matrix);
 
 	loadParameters();
 }
@@ -61,9 +51,6 @@ void FrontApproachPrecisionLandCombined::loadParameters()
 
 	_node.declare_parameter<float>("precision_target_timeout", 3.0f);
 	_node.declare_parameter<float>("precision_descent_velocity", 0.5f);
-	_node.declare_parameter<float>("precision_vel_p", 1.5f);
-	_node.declare_parameter<float>("precision_vel_i", 0.0f);
-	_node.declare_parameter<float>("precision_max_velocity", 1.0f);
 	_node.declare_parameter<float>("precision_delta_position", 0.25f);
 	_node.declare_parameter<float>("precision_delta_velocity", 0.25f);
 
@@ -79,9 +66,6 @@ void FrontApproachPrecisionLandCombined::loadParameters()
 
 	_node.get_parameter("precision_target_timeout", _param_precision_target_timeout);
 	_node.get_parameter("precision_descent_velocity", _param_precision_descent_vel);
-	_node.get_parameter("precision_vel_p", _param_precision_kp);
-	_node.get_parameter("precision_vel_i", _param_precision_ki);
-	_node.get_parameter("precision_max_velocity", _param_precision_max_vel);
 	_node.get_parameter("precision_delta_position", _param_precision_delta_position);
 	_node.get_parameter("precision_delta_velocity", _param_precision_delta_velocity);
 }
@@ -91,7 +75,7 @@ void FrontApproachPrecisionLandCombined::frontTargetCallback(const geometry_msgs
 	ArucoTag tag;
 	tag.position = Eigen::Vector3d(msg->pose.position.x, msg->pose.position.y, msg->pose.position.z);
 	tag.orientation = Eigen::Quaterniond(msg->pose.orientation.w, msg->pose.orientation.x,
-						     msg->pose.orientation.y, msg->pose.orientation.z).normalized();
+					     msg->pose.orientation.y, msg->pose.orientation.z).normalized();
 	tag.timestamp = _node.now();
 
 	const auto vehicle_position = _vehicle_local_position->positionNed();
@@ -125,18 +109,6 @@ void FrontApproachPrecisionLandCombined::frontTargetCallback(const geometry_msgs
 	_front_tag.timestamp = tag.timestamp;
 }
 
-void FrontApproachPrecisionLandCombined::downTargetCallback(const geometry_msgs::msg::PoseStamped::SharedPtr msg)
-{
-	ArucoTag tag;
-	tag.position = Eigen::Vector3d(msg->pose.position.x, msg->pose.position.y, msg->pose.position.z);
-	tag.orientation = Eigen::Quaterniond(msg->pose.orientation.w, msg->pose.orientation.x,
-						     msg->pose.orientation.y, msg->pose.orientation.z).normalized();
-	tag.timestamp = _node.now();
-
-	_down_tag = transformDownTag(tag);
-	_down_tag.timestamp = tag.timestamp;
-}
-
 void FrontApproachPrecisionLandCombined::landDetectedCallback(const px4_msgs::msg::VehicleLandDetected::SharedPtr msg)
 {
 	_land_detected = msg->landed;
@@ -145,28 +117,21 @@ void FrontApproachPrecisionLandCombined::landDetectedCallback(const px4_msgs::ms
 void FrontApproachPrecisionLandCombined::onActivate()
 {
 	_front_tag = {};
-	_down_tag = {};
 	_land_detected = false;
 	_front_target_lost_prev = true;
-	_down_target_lost_prev = true;
 	resetFrontController();
-	_precision_integral_x = 0.f;
-	_precision_integral_y = 0.f;
 	switchToState(State::FrontSearch);
 }
 
 void FrontApproachPrecisionLandCombined::onDeactivate()
 {
 	resetFrontController();
-	_precision_integral_x = 0.f;
-	_precision_integral_y = 0.f;
 }
 
 void FrontApproachPrecisionLandCombined::updateSetpoint(float dt_s)
 {
 	const auto now = _node.now();
 	bool front_lost = targetExpired(now, _front_tag);
-	bool down_lost = targetExpired(now, _down_tag);
 
 	if (front_lost && !_front_target_lost_prev) {
 		RCLCPP_INFO(_node.get_logger(), "Front target lost while in %s", stateName(_state).c_str());
@@ -174,13 +139,6 @@ void FrontApproachPrecisionLandCombined::updateSetpoint(float dt_s)
 		RCLCPP_INFO(_node.get_logger(), "Front target acquired");
 	}
 	_front_target_lost_prev = front_lost;
-
-	if (down_lost && !_down_target_lost_prev) {
-		RCLCPP_INFO(_node.get_logger(), "Downward target lost while in %s", stateName(_state).c_str());
-	} else if (!down_lost && _down_target_lost_prev) {
-		RCLCPP_INFO(_node.get_logger(), "Downward target acquired");
-	}
-	_down_target_lost_prev = down_lost;
 
 	switch (_state) {
 	case State::Idle:
@@ -214,11 +172,7 @@ void FrontApproachPrecisionLandCombined::updateSetpoint(float dt_s)
 
 		if (distance_xy > 1e-3) {
 			double hold = static_cast<double>(_param_front_hold_distance);
-			if (distance_xy > hold) {
-				desired_xy = delta_xy - delta_xy.normalized() * hold;
-			} else {
-				desired_xy = Eigen::Vector2d::Zero();
-			}
+			desired_xy = delta_xy - delta_xy.normalized() * hold;
 		}
 
 		Eigen::Vector3f target_position(
@@ -261,44 +215,16 @@ void FrontApproachPrecisionLandCombined::updateSetpoint(float dt_s)
 
 		if (positionReached(target_position)) {
 			resetFrontController();
-			_down_tag = {};
 			switchToState(State::PrecisionApproach);
 		}
 		break;
 	}
 
 	case State::PrecisionApproach: {
-		if (down_lost) {
-			Eigen::Vector3f hold = _vehicle_local_position->positionNed();
-			_trajectory_setpoint->updatePosition(hold);
-			break;
-		}
+		// Descend straight down — ramp latched Z target each tick
+		_precision_target.z() += _param_precision_descent_vel * dt_s;
 
-		Eigen::Vector3f target(
-		static_cast<float>(_down_tag.position.x()),
-		static_cast<float>(_down_tag.position.y()),
-		_vehicle_local_position->positionNed().z());
-
-		_trajectory_setpoint->updatePosition(target);
-
-		if (positionReached(target)) {
-			switchToState(State::PrecisionDescend);
-		}
-		break;
-	}
-
-	case State::PrecisionDescend: {
-		if (down_lost) {
-			RCLCPP_INFO(_node.get_logger(), "Downward target lost during descend");
-			switchToState(State::PrecisionApproach);
-			break;
-		}
-
-		Eigen::Vector2f vel_xy = calculatePrecisionVelocityXY();
-		_trajectory_setpoint->update(
-			Eigen::Vector3f(vel_xy.x(), vel_xy.y(), _param_precision_descent_vel),
-			std::nullopt,
-			px4_ros2::quaternionToYaw(_down_tag.orientation));
+		_trajectory_setpoint->updatePosition(_precision_target);
 
 		if (_land_detected) {
 			switchToState(State::Finished);
@@ -338,37 +264,13 @@ FrontApproachPrecisionLandCombined::ArucoTag FrontApproachPrecisionLandCombined:
 	return world;
 }
 
-FrontApproachPrecisionLandCombined::ArucoTag FrontApproachPrecisionLandCombined::transformDownTag(const ArucoTag& tag) const
-{
-	ArucoTag world = tag;
-
-	if (!tag.valid()) {
-		return world;
-	}
-
-	auto vehicle_position = Eigen::Vector3d(_vehicle_local_position->positionNed().cast<double>());
-	auto vehicle_orientation = Eigen::Quaterniond(_vehicle_attitude->attitude().cast<double>());
-
-	Eigen::Affine3d drone_transform = Eigen::Translation3d(vehicle_position) * vehicle_orientation;
-	Eigen::Affine3d camera_transform = Eigen::Translation3d(0, 0, 0) * _down_optical_to_body;
-	Eigen::Affine3d tag_transform = Eigen::Translation3d(tag.position) * tag.orientation;
-
-	Eigen::Affine3d tag_world = drone_transform * camera_transform * tag_transform;
-	world.position = tag_world.translation();
-	world.orientation = Eigen::Quaterniond(tag_world.rotation()).normalized();
-
-	return world;
-}
-
 bool FrontApproachPrecisionLandCombined::targetExpired(const rclcpp::Time& now, const ArucoTag& tag) const
 {
 	if (!tag.valid()) {
 		return true;
 	}
 
-	float timeout = (&tag == &_front_tag) ? _param_front_target_timeout : _param_precision_target_timeout;
-
-	return (now - tag.timestamp).seconds() > timeout;
+	return (now - tag.timestamp).seconds() > _param_front_target_timeout;
 }
 
 bool FrontApproachPrecisionLandCombined::positionReached(const Eigen::Vector3f& target) const
@@ -381,27 +283,6 @@ bool FrontApproachPrecisionLandCombined::positionReached(const Eigen::Vector3f& 
 	return (delta.head<2>().norm() < _param_precision_delta_position)
 		&& (std::abs(delta.z()) < _param_precision_delta_position)
 		&& (velocity.norm() < _param_precision_delta_velocity);
-}
-
-Eigen::Vector2f FrontApproachPrecisionLandCombined::calculatePrecisionVelocityXY()
-{
-	float delta_pos_x = _vehicle_local_position->positionNed().x() - static_cast<float>(_down_tag.position.x());
-	float delta_pos_y = _vehicle_local_position->positionNed().y() - static_cast<float>(_down_tag.position.y());
-
-	_precision_integral_x += delta_pos_x;
-	_precision_integral_y += delta_pos_y;
-
-	float max_integral = _param_precision_max_vel;
-	_precision_integral_x = std::clamp(_precision_integral_x, -max_integral, max_integral);
-	_precision_integral_y = std::clamp(_precision_integral_y, -max_integral, max_integral);
-
-	float vx = -1.f * (delta_pos_x * _param_precision_kp + _precision_integral_x * _param_precision_ki);
-	float vy = -1.f * (delta_pos_y * _param_precision_kp + _precision_integral_y * _param_precision_ki);
-
-	vx = std::clamp(vx, -_param_precision_max_vel, _param_precision_max_vel);
-	vy = std::clamp(vy, -_param_precision_max_vel, _param_precision_max_vel);
-
-	return Eigen::Vector2f(vx, vy);
 }
 
 void FrontApproachPrecisionLandCombined::resetFrontController()
@@ -423,6 +304,13 @@ void FrontApproachPrecisionLandCombined::switchToState(State state)
 	if (state == State::FrontSearch) {
 		resetFrontController();
 	}
+
+	if (state == State::PrecisionApproach) {
+		auto pos = _vehicle_local_position->positionNed();
+		_precision_target = pos;
+		RCLCPP_INFO(_node.get_logger(), "Descending straight down from [%.2f, %.2f, %.2f]",
+			_precision_target.x(), _precision_target.y(), _precision_target.z());
+	}
 }
 
 std::string FrontApproachPrecisionLandCombined::stateName(State state) const
@@ -435,13 +323,66 @@ std::string FrontApproachPrecisionLandCombined::stateName(State state) const
 	case State::FrontApproach:
 		return "FrontApproach";
 	case State::PrecisionApproach:
-		return "PrecisionApproach";
-	case State::PrecisionDescend:
-		return "PrecisionDescend";
+		return "Descend";
 	case State::Finished:
 		return "Finished";
 	default:
 		return "Unknown";
+	}
+}
+
+// ── Executor: arm -> takeoff -> schedule mode -> wait for disarm ──
+
+FrontApproachPrecisionLandExecutor::FrontApproachPrecisionLandExecutor(rclcpp::Node& node, px4_ros2::ModeBase& owned_mode)
+	: ModeExecutorBase(node, ModeExecutorBase::Settings{Settings::Activation::ActivateAlways}, owned_mode)
+	, _node(node)
+{
+	setSkipMessageCompatibilityCheck();
+	_node.declare_parameter<float>("takeoff_height", 2.5f);
+	_node.get_parameter("takeoff_height", _param_takeoff_height);
+}
+
+void FrontApproachPrecisionLandExecutor::onActivate()
+{
+	RCLCPP_INFO(_node.get_logger(), "FrontToPrecisionLand executor — arming and taking off to %.1f m", _param_takeoff_height);
+	runState(State::Arming, px4_ros2::Result::Success);
+}
+
+void FrontApproachPrecisionLandExecutor::onDeactivate(DeactivateReason reason)
+{
+}
+
+void FrontApproachPrecisionLandExecutor::runState(State state, px4_ros2::Result result)
+{
+	if (result != px4_ros2::Result::Success) {
+		RCLCPP_ERROR(_node.get_logger(), "State %i failed: %s", (int)state,
+			resultToString(result));
+		return;
+	}
+
+	switch (state) {
+	case State::Arming:
+		arm([this](px4_ros2::Result r) { runState(State::TakingOff, r); });
+		break;
+
+	case State::TakingOff:
+		takeoff([this](px4_ros2::Result r) { runState(State::Approaching, r); },
+			_param_takeoff_height);
+		break;
+
+	case State::Approaching:
+		RCLCPP_INFO(_node.get_logger(), "Takeoff complete — starting front approach and land");
+		scheduleMode(ownedMode().id(), [this](px4_ros2::Result r) {
+			runState(State::Disarming, r);
+		});
+		break;
+
+	case State::Disarming:
+		RCLCPP_INFO(_node.get_logger(), "Landed — waiting for disarm");
+		waitUntilDisarmed([this](px4_ros2::Result r) {
+			RCLCPP_INFO(_node.get_logger(), "Disarmed — FrontToPrecisionLand complete");
+		});
+		break;
 	}
 }
 
@@ -450,7 +391,8 @@ std::string FrontApproachPrecisionLandCombined::stateName(State state) const
 int main(int argc, char* argv[])
 {
 	rclcpp::init(argc, argv);
-	rclcpp::spin(std::make_shared<px4_ros2::NodeWithMode<precision_land::FrontApproachPrecisionLandCombined>>(
+	rclcpp::spin(std::make_shared<px4_ros2::NodeWithModeExecutor<
+		precision_land::FrontApproachPrecisionLandExecutor, precision_land::FrontApproachPrecisionLandCombined>>(
 		precision_land::kFrontToPrecisionModeName, precision_land::kFrontToPrecisionDebugOutput));
 	rclcpp::shutdown();
 	return 0;
