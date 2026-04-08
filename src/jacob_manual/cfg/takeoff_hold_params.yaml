@@ -1,8 +1,7 @@
-takeoff_land:
+takeoff_hold:
   ros__parameters:
     optical_flow_height: 0.25
     optical_flow_hold_time: 3.0
-    target_height: 1.0
+    target_height: 1.0 
     climb_rate: 0.3
     delta_position: 0.05
-    hold_duration: 5.0

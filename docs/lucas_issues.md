@@ -14,6 +14,8 @@ docker run hello-world
 2) Prerequites in 2 different sections with different ROS 2 and Ubuntu Reqs. Fine during install
 3) Had to locally build px4_sitl when importing custom worlds. Otherwise you just copy the world over
 4) Add `--recursive` to end of PX4 clone to load gz assets
+Drift on Takeoff, but holds position. Do we need to 0 position of FLow sensors
+
 
 My Command:
 ```shell
@@ -162,11 +164,15 @@ New:
 
 ### Adding the ARKFlow
 New:
+    "Need to adjust the position of the Optical Flow Sensor Relative to the CG"
     EKF2_OF_POS_X +0.025m
     EKF2_OF_POS_Y -0.010m
     EKF2_OF_POS_Z +0.070m
+    "All CAN Protocol to grab sensors on CAN ports connected to cube and fuse in EKF2"
+    "Where EKF2 is the Extended Kalman Filter and allows us to stabilize flight"
     UAVCAN_ENABLE: Sensors Automatic Config
     --reboot-
+    "Enable Optical Flow Input to EKF2, we DONT want to use GPS"
     EKF2_OF_CTRL: Enabled (1)
     EKF2_GPS_CTRL: Disabled (-)
     UAVCAN_SUB_FLOW: Enabled (1)
@@ -174,6 +180,7 @@ New:
     UAVCAN_SUB_GPS: Disabled(0)
     UAVCAN_SUB_GPS_R: Disabled(0)
     EKF2_RNG_CTRL: Enabled (1)
+    "Check Quality and max/min heights for the ArkFlow Sensors"
     EKF2_RNG_A_HMAX: 10.
     EKF2_RNG_QLTY_T: 0.2.
     UAVCAN_RNG_MIN: 0.08.
@@ -181,8 +188,13 @@ New:
     SENS_FLOW_MINHGT: 0.08.
     SENS_FLOW_MAXHGT: 25.
     SENS_FLOW_MAXR: 7.4
-    EKF2_OF_POS_X, EKF2_OF_POS_Y and EKF2_OF_POS_Z can be set to account for the offset of the Ark Flow from the vehicle centre of gravity.
+    "MPC: Position Control, so MPC_XY_P is the gain of XY axis controller for position hold"
     MPC_XY_P: 0.5
+    "We want to get up to speed faster into the air on Takeoff"
+    MPC_ACC_UP_MAX: 5.0
+    MPC_TKO_SPEED: 2.0
+    "If not specified, takeoff to half a meter instead of 2.5 meters"
+    MIS_TAKEOFF_ALT: 0.5m
 
 
 ### Scripts to Run

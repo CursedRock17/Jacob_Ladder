@@ -23,7 +23,7 @@ def dump_params(param_file_path, node_name):
 # General Call to Create the Launch File
 def generate_launch_description():
     # Add in all separate packages
-    voxl_mpa_ros2_bridge = get_package_share_directory("voxl_mpa_to_ros2")
+    mpa_ros2_bridge = get_package_share_directory("voxl_mpa_to_ros2")
     foxglove_bridge = get_package_share_directory("foxglove_bridge")
 
     # In case you need to namespace:
@@ -45,15 +45,15 @@ def generate_launch_description():
     max_velocity = LaunchConfiguration('max_velocity'),
     max_acceleration = LaunchConfiguration('max_acceleration'),
 
-    # Include the Voxl MPA To ROS 2 connection launch file.
-    voxl_mpa_to_ros2 = IncludeLaunchDescription(
+    # Include the MPA To ROS 2 connection launch file.
+    mpa_to_ros2 = IncludeLaunchDescription(
         XMLLaunchDescriptionSource(
-            os.path.join(voxl_mpa_ros2_bridge, "launch", "voxl_map_to_ros2.launch"))
+            os.path.join(mpa_ros2_bridge, "launch", "voxl_map_to_ros2.launch"))
     )
 
     # ROS 2 Node that runs the autonomous landing code
     drone_smooth_planner_node = Node(
-        package='voxl_offboard_ship_land',
+        package='drogue_flight',
         executable='drone_smooth_planner',
         parameters=[{
             'num_waypoints': num_waypoints,
@@ -70,7 +70,7 @@ def generate_launch_description():
 
     # ROS 2 Node that runs the ranging algorithm to the drogue/coupler
     drogue_ranging_node = Node(
-        package='voxl_offboard_ship_land',
+        package='drogue_flight',
         executable='drogue_range_ros_node',
         name="drogue_ranging",
         output='screen',
@@ -94,7 +94,7 @@ def generate_launch_description():
                     package='rosbag2_transport',
                     plugin='rosbag2_transport::Recorder',
                     name='recorder',
-                    parameters=dump_params(os.path.join('./voxl_offboard_ship_land/config/', 'recorder_params.yaml'), "recorder"),
+                    parameters=dump_params(os.path.join('./drogue_flight/config/', 'recorder_params.yaml'), "recorder"),
                     extra_arguments=[{'use_intra_process_comms': True}]
                 ),
             ]
@@ -111,7 +111,7 @@ def generate_launch_description():
         max_acceleration_launch,
         ExecuteProcess(cmd=[['foxglove-studio']]),
         foxglove,
-        voxl_mpa_to_ros2,
+        mpa_to_ros2,
         drone_smooth_planner_node,
         drogue_ranging_node,
         ros2bag_node,

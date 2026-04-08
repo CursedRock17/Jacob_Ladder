@@ -1,0 +1,71 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<dds>
+    <profiles xmlns="http://www.eprosima.com/XMLSchemas/fastRTPS_Profiles">
+
+        <!-- Default participant: use PREALLOCATED_WITH_REALLOC so the agent
+             can resize history buffers when PX4 messages exceed the initial
+             allocation instead of dropping them with RTPS_HISTORY errors. -->
+        <participant profile_name="default_xrce_participant" is_default_profile="true">
+            <rtps>
+                <name>default_xrce_participant</name>
+                <builtin>
+                    <writerHistoryMemoryPolicy>PREALLOCATED_WITH_REALLOC</writerHistoryMemoryPolicy>
+                    <readerHistoryMemoryPolicy>PREALLOCATED_WITH_REALLOC</readerHistoryMemoryPolicy>
+                </builtin>
+            </rtps>
+        </participant>
+
+        <!-- Default data writer (Agent publishing PX4 topics into DDS).
+             KEEP_LAST with depth 50 prevents the history from filling up
+             on high-frequency topics like vehicle_local_position (~200 Hz). -->
+        <data_writer profile_name="default_xrce_participant__dw" is_default_profile="true">
+            <historyMemoryPolicy>PREALLOCATED_WITH_REALLOC</historyMemoryPolicy>
+            <qos>
+                <reliability>
+                    <kind>BEST_EFFORT</kind>
+                </reliability>
+                <durability>
+                    <kind>VOLATILE</kind>
+                </durability>
+            </qos>
+            <topic>
+                <historyQos>
+                    <kind>KEEP_LAST</kind>
+                    <depth>50</depth>
+                </historyQos>
+                <resourceLimitsQos>
+                    <max_samples>100</max_samples>
+                    <max_instances>1</max_instances>
+                    <max_samples_per_instance>100</max_samples_per_instance>
+                    <allocated_samples>50</allocated_samples>
+                </resourceLimitsQos>
+            </topic>
+        </data_writer>
+
+        <!-- Default data reader (Agent subscribing to ROS 2 commands for PX4). -->
+        <data_reader profile_name="default_xrce_participant__dr" is_default_profile="true">
+            <historyMemoryPolicy>PREALLOCATED_WITH_REALLOC</historyMemoryPolicy>
+            <qos>
+                <reliability>
+                    <kind>BEST_EFFORT</kind>
+                </reliability>
+                <durability>
+                    <kind>VOLATILE</kind>
+                </durability>
+            </qos>
+            <topic>
+                <historyQos>
+                    <kind>KEEP_LAST</kind>
+                    <depth>50</depth>
+                </historyQos>
+                <resourceLimitsQos>
+                    <max_samples>100</max_samples>
+                    <max_instances>1</max_instances>
+                    <max_samples_per_instance>100</max_samples_per_instance>
+                    <allocated_samples>50</allocated_samples>
+                </resourceLimitsQos>
+            </topic>
+        </data_reader>
+
+    </profiles>
+</dds>

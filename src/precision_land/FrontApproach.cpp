@@ -134,6 +134,11 @@ void FrontApproach::updateSetpoint(float dt_s)
 		break;
 
 	case State::Search: {
+		RCLCPP_INFO_THROTTLE(_node.get_logger(), *_node.get_clock(), 3000,
+			"[Search] holding at [%.2f, %.2f, %.2f] — waiting for front target",
+			_vehicle_local_position->positionNed().x(),
+			_vehicle_local_position->positionNed().y(),
+			_vehicle_local_position->positionNed().z());
 		Eigen::Vector3f hold = _vehicle_local_position->positionNed();
 		_trajectory_setpoint->updatePosition(hold);
 
@@ -144,6 +149,13 @@ void FrontApproach::updateSetpoint(float dt_s)
 	}
 
 	case State::Approach: {
+		RCLCPP_INFO_THROTTLE(_node.get_logger(), *_node.get_clock(), 2000,
+			"[Approach] tag: [%.2f, %.2f, %.2f] | drone: [%.2f, %.2f, %.2f] | dist: %.2f m",
+			_front_tag.position.x(), _front_tag.position.y(), _front_tag.position.z(),
+			_vehicle_local_position->positionNed().x(),
+			_vehicle_local_position->positionNed().y(),
+			_vehicle_local_position->positionNed().z(),
+			(_front_tag.position - _vehicle_local_position->positionNed().cast<double>()).norm());
 		if (target_lost) {
 			switchToState(State::Search);
 			break;

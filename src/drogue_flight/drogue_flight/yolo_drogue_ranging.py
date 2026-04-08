@@ -44,7 +44,7 @@ SHOW = False
 # =========================
 # UDP SETTINGS
 # =========================
-UDP_IP = "127.0.0.1"     # if ROS2 node is on same VOXL2, keep localhost
+UDP_IP = "127.0.0.1"     # if ROS2 node is on same device, keep localhost
 UDP_PORT = 5005
 UDP_SEND_HZ = 30         # cap send rate (prevents spamming if inference spikes)
 UDP_SEND_ONLY_IF_VALID = False  # set True if you only want packets when detections exist

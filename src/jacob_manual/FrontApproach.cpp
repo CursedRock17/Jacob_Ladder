@@ -1,4 +1,4 @@
-#include "DrogueApproach.hpp"
+#include "FrontApproach.hpp"
 
 #include <px4_ros2/components/node_with_mode.hpp>
 #include <px4_ros2/utils/geometry.hpp>
@@ -6,13 +6,11 @@
 #include <algorithm>
 #include <cmath>
 
-namespace drogue_land
+namespace precision_land
 {
 
-// ── Mode ──
-
-DrogueApproachMode::DrogueApproachMode(rclcpp::Node& node)
-	: ModeBase(node, ModeBase::Settings{kDrogueApproachModeName, false})
+FrontApproach::FrontApproach(rclcpp::Node& node)
+	: ModeBase(node, ModeBase::Settings{kFrontApproachModeName})
 	, _node(node)
 {
 	setSkipMessageCompatibilityCheck();
@@ -22,11 +20,10 @@ DrogueApproachMode::DrogueApproachMode(rclcpp::Node& node)
 	_trajectory_setpoint = std::make_shared<px4_ros2::TrajectorySetpointType>(*this);
 
 	auto qos = rclcpp::QoS(1).best_effort();
-	_target_sub = _node.create_subscription<geometry_msgs::msg::PoseStamped>(
-		"/tag_detections", qos,
-		std::bind(&DrogueApproachMode::targetCallback, this, std::placeholders::_1));
+	_front_target_sub = _node.create_subscription<geometry_msgs::msg::PoseStamped>(
+		"/target_pose", qos,
+		std::bind(&FrontApproach::frontTargetCallback, this, std::placeholders::_1));
 
-	// Front camera optical → body frame rotation
 	Eigen::Matrix3d front_matrix;
 	front_matrix << 0, 0, 1,
 			1, 0, 0,
@@ -36,43 +33,43 @@ DrogueApproachMode::DrogueApproachMode(rclcpp::Node& node)
 	loadParameters();
 }
 
-void DrogueApproachMode::loadParameters()
+void FrontApproach::loadParameters()
 {
-	_node.declare_parameter<float>("drogue_hold_distance", 1.0f);
-	_node.declare_parameter<float>("drogue_delta_position", 0.25f);
-	_node.declare_parameter<float>("drogue_delta_velocity", 0.25f);
-	_node.declare_parameter<float>("drogue_target_timeout", 3.0f);
+	_node.declare_parameter<float>("front_hold_distance", 1.0f);
+	_node.declare_parameter<float>("front_delta_position", 0.25f);
+	_node.declare_parameter<float>("front_delta_velocity", 0.25f);
+	_node.declare_parameter<float>("front_target_timeout", 3.0f);
 
-	_node.declare_parameter<float>("drogue_pid_kp", 0.8f);
-	_node.declare_parameter<float>("drogue_pid_ki", 0.02f);
-	_node.declare_parameter<float>("drogue_pid_kd", 0.3f);
-	_node.declare_parameter<float>("drogue_pid_max_velocity", 1.0f);
-	_node.declare_parameter<float>("drogue_pid_integral_limit", 0.5f);
+	_node.declare_parameter<float>("front_pid_kp", 1.2f);
+	_node.declare_parameter<float>("front_pid_ki", 0.0f);
+	_node.declare_parameter<float>("front_pid_kd", 0.0f);
+	_node.declare_parameter<float>("front_pid_max_velocity", 2.5f);
+	_node.declare_parameter<float>("front_pid_integral_limit", 1.5f);
 
-	_node.declare_parameter<float>("drogue_pid_kp_z", 0.6f);
-	_node.declare_parameter<float>("drogue_pid_max_velocity_z", 0.6f);
+	_node.declare_parameter<float>("front_pid_kp_z", 1.0f);
+	_node.declare_parameter<float>("front_pid_max_velocity_z", 1.0f);
 
-	_node.get_parameter("drogue_hold_distance", _param_hold_distance);
-	_node.get_parameter("drogue_delta_position", _param_delta_position);
-	_node.get_parameter("drogue_delta_velocity", _param_delta_velocity);
-	_node.get_parameter("drogue_target_timeout", _param_target_timeout);
+	_node.get_parameter("front_hold_distance", _param_hold_distance);
+	_node.get_parameter("front_delta_position", _param_delta_position);
+	_node.get_parameter("front_delta_velocity", _param_delta_velocity);
+	_node.get_parameter("front_target_timeout", _param_target_timeout);
 
-	_node.get_parameter("drogue_pid_kp", _param_kp_xy);
-	_node.get_parameter("drogue_pid_ki", _param_ki_xy);
-	_node.get_parameter("drogue_pid_kd", _param_kd_xy);
-	_node.get_parameter("drogue_pid_max_velocity", _param_max_velocity_xy);
-	_node.get_parameter("drogue_pid_integral_limit", _param_integral_limit);
+	_node.get_parameter("front_pid_kp", _param_kp_xy);
+	_node.get_parameter("front_pid_ki", _param_ki_xy);
+	_node.get_parameter("front_pid_kd", _param_kd_xy);
+	_node.get_parameter("front_pid_max_velocity", _param_max_velocity_xy);
+	_node.get_parameter("front_pid_integral_limit", _param_integral_limit);
 
-	_node.get_parameter("drogue_pid_kp_z", _param_kp_z);
-	_node.get_parameter("drogue_pid_max_velocity_z", _param_max_velocity_z);
+	_node.get_parameter("front_pid_kp_z", _param_kp_z);
+	_node.get_parameter("front_pid_max_velocity_z", _param_max_velocity_z);
 }
 
-void DrogueApproachMode::targetCallback(const geometry_msgs::msg::PoseStamped::SharedPtr msg)
+void FrontApproach::frontTargetCallback(const geometry_msgs::msg::PoseStamped::SharedPtr msg)
 {
-	TargetTag tag;
+	ArucoTag tag;
 	tag.position = Eigen::Vector3d(msg->pose.position.x, msg->pose.position.y, msg->pose.position.z);
 	tag.orientation = Eigen::Quaterniond(msg->pose.orientation.w, msg->pose.orientation.x,
-					     msg->pose.orientation.y, msg->pose.orientation.z).normalized();
+						     msg->pose.orientation.y, msg->pose.orientation.z).normalized();
 	tag.timestamp = _node.now();
 
 	const auto vehicle_position = _vehicle_local_position->positionNed();
@@ -102,32 +99,32 @@ void DrogueApproachMode::targetCallback(const geometry_msgs::msg::PoseStamped::S
 		return;
 	}
 
-	_tag = transformTagToWorld(tag);
-	_tag.timestamp = tag.timestamp;
+	_front_tag = transformTagToWorld(tag);
+	_front_tag.timestamp = tag.timestamp;
 }
 
-void DrogueApproachMode::onActivate()
+void FrontApproach::onActivate()
 {
-	_tag = {};
+	_front_tag = {};
 	_target_lost_prev = true;
 	resetController();
 	switchToState(State::Search);
 }
 
-void DrogueApproachMode::onDeactivate()
+void FrontApproach::onDeactivate()
 {
 	resetController();
 }
 
-void DrogueApproachMode::updateSetpoint(float dt_s)
+void FrontApproach::updateSetpoint(float dt_s)
 {
 	auto now = _node.now();
 	bool target_lost = targetExpired(now);
 
 	if (target_lost && !_target_lost_prev) {
-		RCLCPP_INFO(_node.get_logger(), "Drogue target lost while in %s", stateName(_state).c_str());
+		RCLCPP_INFO(_node.get_logger(), "Front target lost while in %s", stateName(_state).c_str());
 	} else if (!target_lost && _target_lost_prev) {
-		RCLCPP_INFO(_node.get_logger(), "Drogue target acquired");
+		RCLCPP_INFO(_node.get_logger(), "Front target acquired");
 	}
 
 	_target_lost_prev = target_lost;
@@ -140,7 +137,7 @@ void DrogueApproachMode::updateSetpoint(float dt_s)
 		Eigen::Vector3f hold = _vehicle_local_position->positionNed();
 		_trajectory_setpoint->updatePosition(hold);
 
-		if (_tag.valid() && !target_lost) {
+		if (_front_tag.valid() && !target_lost) {
 			switchToState(State::Approach);
 		}
 		break;
@@ -153,7 +150,7 @@ void DrogueApproachMode::updateSetpoint(float dt_s)
 		}
 
 		Eigen::Vector3d vehicle_pos = _vehicle_local_position->positionNed().cast<double>();
-		Eigen::Vector3d tag_pos = _tag.position;
+		Eigen::Vector3d tag_pos = _front_tag.position;
 
 		Eigen::Vector3d to_tag = tag_pos - vehicle_pos;
 		Eigen::Vector2d delta_xy(to_tag.x(), to_tag.y());
@@ -181,7 +178,7 @@ void DrogueApproachMode::updateSetpoint(float dt_s)
 
 		_integral_xy += error_xy * dt_s;
 		_integral_xy = _integral_xy.cwiseMax(-Eigen::Vector2d::Constant(_param_integral_limit))
-					.cwiseMin(Eigen::Vector2d::Constant(_param_integral_limit));
+						.cwiseMin(Eigen::Vector2d::Constant(_param_integral_limit));
 
 		Eigen::Vector2d derivative_xy = Eigen::Vector2d::Zero();
 		if (_has_prev_error && dt_s > 1e-3f) {
@@ -224,9 +221,9 @@ void DrogueApproachMode::updateSetpoint(float dt_s)
 	}
 }
 
-DrogueApproachMode::TargetTag DrogueApproachMode::transformTagToWorld(const TargetTag& tag) const
+FrontApproach::ArucoTag FrontApproach::transformTagToWorld(const ArucoTag& tag) const
 {
-	TargetTag world = tag;
+	ArucoTag world = tag;
 
 	if (!tag.valid()) {
 		return world;
@@ -246,16 +243,16 @@ DrogueApproachMode::TargetTag DrogueApproachMode::transformTagToWorld(const Targ
 	return world;
 }
 
-bool DrogueApproachMode::targetExpired(const rclcpp::Time& now) const
+bool FrontApproach::targetExpired(const rclcpp::Time& now) const
 {
-	if (!_tag.valid()) {
+	if (!_front_tag.valid()) {
 		return true;
 	}
 
-	return (now - _tag.timestamp).seconds() > _param_target_timeout;
+	return (now - _front_tag.timestamp).seconds() > _param_target_timeout;
 }
 
-bool DrogueApproachMode::positionReached(const Eigen::Vector3f& target) const
+bool FrontApproach::positionReached(const Eigen::Vector3f& target) const
 {
 	auto position = _vehicle_local_position->positionNed();
 	auto velocity = _vehicle_local_position->velocityNed();
@@ -267,14 +264,14 @@ bool DrogueApproachMode::positionReached(const Eigen::Vector3f& target) const
 		&& (velocity.norm() < _param_delta_velocity);
 }
 
-void DrogueApproachMode::resetController()
+void FrontApproach::resetController()
 {
 	_integral_xy.setZero();
 	_prev_error_xy.setZero();
 	_has_prev_error = false;
 }
 
-void DrogueApproachMode::switchToState(State state)
+void FrontApproach::switchToState(State state)
 {
 	if (_state == state) {
 		return;
@@ -288,7 +285,7 @@ void DrogueApproachMode::switchToState(State state)
 	}
 }
 
-std::string DrogueApproachMode::stateName(State state) const
+std::string FrontApproach::stateName(State state) const
 {
 	switch (state) {
 	case State::Idle:
@@ -304,100 +301,13 @@ std::string DrogueApproachMode::stateName(State state) const
 	}
 }
 
-// ── Executor ──
-
-DrogueApproachExecutor::DrogueApproachExecutor(rclcpp::Node& node, px4_ros2::ModeBase& owned_mode)
-	: ModeExecutorBase(node, ModeExecutorBase::Settings{Settings::Activation::ActivateAlways}, owned_mode)
-	, _node(node)
-{
-	setSkipMessageCompatibilityCheck();
-	_node.declare_parameter<float>("takeoff_height", 2.5f);
-	_node.declare_parameter<float>("hold_duration", 3.0f);
-	_node.get_parameter("takeoff_height", _param_takeoff_height);
-	_node.get_parameter("hold_duration", _param_hold_duration);
-}
-
-void DrogueApproachExecutor::onActivate()
-{
-	RCLCPP_INFO(_node.get_logger(), "DrogueApproach executor — arming and taking off to %.1f m",
-		_param_takeoff_height);
-	runState(State::Arming, px4_ros2::Result::Success);
-}
-
-void DrogueApproachExecutor::onDeactivate(DeactivateReason reason)
-{
-	if (_hold_timer) {
-		_hold_timer->cancel();
-	}
-}
-
-void DrogueApproachExecutor::runState(State state, px4_ros2::Result result)
-{
-	if (result != px4_ros2::Result::Success) {
-		RCLCPP_ERROR(_node.get_logger(), "State %i failed: %s", (int)state,
-			resultToString(result));
-		return;
-	}
-
-	switch (state) {
-	case State::Arming:
-		arm([this](px4_ros2::Result r) { runState(State::TakingOff, r); });
-		break;
-
-	case State::TakingOff:
-		takeoff([this](px4_ros2::Result r) { runState(State::Approaching, r); },
-			_param_takeoff_height);
-		break;
-
-	case State::Approaching:
-		RCLCPP_INFO(_node.get_logger(), "Takeoff complete — starting drogue approach");
-		scheduleMode(ownedMode().id(), [this](px4_ros2::Result r) {
-			startHolding(r);
-		});
-		break;
-
-	case State::Holding:
-		break;
-
-	case State::Landing:
-		break;
-
-	case State::WaitingDisarm:
-		RCLCPP_INFO(_node.get_logger(), "Landed — waiting for disarm");
-		waitUntilDisarmed([this](px4_ros2::Result r) {
-			RCLCPP_INFO(_node.get_logger(), "Disarmed (%s)", resultToString(r));
-		});
-		break;
-	}
-}
-
-void DrogueApproachExecutor::startHolding(px4_ros2::Result result)
-{
-	RCLCPP_INFO(_node.get_logger(), "Approach complete — holding position for %.1f s",
-		_param_hold_duration);
-	_hold_timer = _node.create_wall_timer(
-		std::chrono::duration_cast<std::chrono::nanoseconds>(
-			std::chrono::duration<float>(_param_hold_duration)),
-		[this]() {
-			_hold_timer->cancel();
-			startLanding(px4_ros2::Result::Success);
-		});
-}
-
-void DrogueApproachExecutor::startLanding(px4_ros2::Result result)
-{
-	RCLCPP_INFO(_node.get_logger(), "Hold complete — landing");
-	land([this](px4_ros2::Result r) { runState(State::WaitingDisarm, r); });
-}
-
-} // namespace drogue_land
+} // namespace precision_land
 
 int main(int argc, char* argv[])
 {
 	rclcpp::init(argc, argv);
-	rclcpp::spin(std::make_shared<px4_ros2::NodeWithModeExecutor<
-		drogue_land::DrogueApproachExecutor, drogue_land::DrogueApproachMode>>(
-		drogue_land::kDrogueApproachModeName, drogue_land::kDrogueApproachDebugOutput));
+	rclcpp::spin(std::make_shared<px4_ros2::NodeWithMode<precision_land::FrontApproach>>(
+		precision_land::kFrontApproachModeName, precision_land::kFrontApproachDebugOutput));
 	rclcpp::shutdown();
 	return 0;
 }

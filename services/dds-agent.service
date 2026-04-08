@@ -6,6 +6,7 @@ After=sys-devices-platform-bus\x400-3100000.serial-tty-ttyTHS1.device syslog.tar
 
 [Service]
 Type=simple
+Environment="FASTRTPS_DEFAULT_PROFILES_FILE=/home/cursedrock17/Documents/Electrical/Matrix_Lab/jacob_drone_ws/src/Jacob_Ladder/config/fastdds_profile.xml"
 ExecStart=/snap/bin/micro-xrce-dds-agent serial -b 3000000 -D /dev/ttyTHS1
 Restart=on-failure
 RestartSec=5

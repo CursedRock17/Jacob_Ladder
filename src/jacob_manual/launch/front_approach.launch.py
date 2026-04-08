@@ -9,12 +9,12 @@ from launch_ros.substitutions import FindPackageShare
 
 def generate_launch_description():
     params = PathJoinSubstitution([
-        FindPackageShare('precision_land'),
+        FindPackageShare('jacob_manual'),
         'cfg',
         'front_approach_params.yaml'
     ])
     rviz_config_file = PathJoinSubstitution([
-        FindPackageShare('precision_land'),
+        FindPackageShare('jacob_manual'),
         'cfg',
         'drone.rviz'
     ])
@@ -31,7 +31,7 @@ def generate_launch_description():
 
     return LaunchDescription([
         Node(
-            package='precision_land',
+            package='jacob_manual',
             executable='front_approach',
             name='front_approach',
             output='screen',
@@ -45,7 +45,7 @@ def generate_launch_description():
             arguments=['-d', rviz_config_file]
         ),
         Node(
-            package='precision_land',
+            package='jacob_manual',
             executable='visualizer',
             name='visualizer',
             output='screen',

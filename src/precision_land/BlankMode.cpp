@@ -32,6 +32,9 @@ void BlankMode::onDeactivate()
 void BlankMode::updateSetpoint(float dt_s)
 {
 	if (_position_set) {
+		RCLCPP_INFO_THROTTLE(_node.get_logger(), *_node.get_clock(), 5000,
+			"[BlankMode] holding at [%.2f, %.2f, %.2f]",
+			_hold_position.x(), _hold_position.y(), _hold_position.z());
 		_trajectory_setpoint->updatePosition(_hold_position);
 	}
 }
