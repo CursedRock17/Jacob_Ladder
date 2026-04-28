@@ -12,7 +12,7 @@ commands=(
     "cd /home/cursedrock17/Documents/Electrical/Matrix_Lab/jacob_drone_ws/src/Jacob_Ladder && source install/setup.bash && MicroXRCEAgent udp4 -p 8888"
     "cd /home/cursedrock17/Documents/Electrical/Matrix_Lab/jacob_drone_ws/src/Jacob_Ladder && source install/setup.bash && ros2 run translation_node translation_node_bin"
     "cd /home/cursedrock17/Documents/Electrical/Matrix_Lab/jacob_drone_ws/src/Jacob_Ladder && source install/setup.bash && ros2 launch aruco_tracker front_camera_aruco.launch.py"
-    "cd /home/cursedrock17/Documents/Electrical/Matrix_Lab/jacob_drone_ws/src/Jacob_Ladder && source install/setup.bash && ros2 launch precision_land front_approach.launch.py"
+    "cd /home/cursedrock17/Documents/Electrical/Matrix_Lab/jacob_drone_ws/src/Jacob_Ladder && source install/setup.bash && ros2 launch jacob_manual front_approach.launch.py"
 )
 
 # Start gnome-terminal with the first tab
@@ -29,7 +29,7 @@ for i in "${!commands[@]}"; do
 
     # Add 20 sec delay only for Precision-Land
     if [ $i -eq 4 ]; then
-        docker_cmd="docker exec -it --user ${user} ${container_name} bash -c \"sleep 20; ${commands[$i]}\""
+        docker_cmd="docker exec -it --user ${user} ${container_name} bash -c \"sleep 5; ${commands[$i]}\""
     else
         docker_cmd="docker exec -it --user ${user} ${container_name} bash -c \"${commands[$i]}\""
     fi

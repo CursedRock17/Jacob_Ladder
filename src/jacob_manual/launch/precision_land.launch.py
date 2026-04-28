@@ -24,6 +24,7 @@ def generate_launch_description():
         cmd=[
             'ros2', 'bag', 'record',
             '-a',
+            '-s', 'mcap',
             '-o', bag_dir,
         ],
         output='screen'
@@ -50,5 +51,5 @@ def generate_launch_description():
             name='visualizer',
             output='screen',
         ),
-        ros2bag_node,
+        #ros2bag_node,
     ])

@@ -18,6 +18,7 @@
   <!-- Dependencies -->
   <depend>px4_ros2_cpp</depend>
   <depend>px4_msgs</depend>
+  <depend>std_msgs</depend>
   <depend>geometry_msgs</depend>
   <depend>tf2_ros</depend>
 

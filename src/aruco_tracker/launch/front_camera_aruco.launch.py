@@ -32,9 +32,9 @@ def generate_launch_description():
         name='front_aruco_tracker',
         output='screen',
         parameters=[{
-            'aruco_id': 1,
+            'aruco_id': 0,
             'dictionary': 2,
-            'marker_size': 0.5,
+            'marker_size': 0.15,
         }],
         remappings=[
             ('/camera', '/front/camera/image_raw'),

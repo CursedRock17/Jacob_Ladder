@@ -1,3 +1,13 @@
+/**
+ * Visualizer.cpp — RViz / Foxglove visualization bridge
+ *
+ * Converts PX4's NED (North-East-Down) data to ENU (East-North-Up)
+ * for standard ROS visualization tools, and publishes:
+ *   - Drone pose + path trail
+ *   - Setpoint path trail
+ *   - Velocity arrow marker
+ *   - TF frames (map -> odom -> base_link)
+ */
 #include "Visualizer.hpp"
 
 #include <cmath>
@@ -94,7 +104,8 @@ void Visualizer::publishDynamicTransforms()
 
 void Visualizer::vehicleAttitudeCallback(const px4_msgs::msg::VehicleAttitude::SharedPtr msg)
 {
-	// Convert NED quaternion (qw, qx, qy, qz) to ENU frame
+	// PX4 sends quaternions in NED frame. ROS/RViz uses ENU.
+	// This math rotates the quaternion from NED to ENU convention.
 	double qw = msg->q[0];
 	double qx = msg->q[1];
 	double qy = msg->q[2];
@@ -102,13 +113,13 @@ void Visualizer::vehicleAttitudeCallback(const px4_msgs::msg::VehicleAttitude::S
 
 	double inv_sqrt2 = 1.0 / std::sqrt(2.0);
 	std::array<double, 4> q_enu = {
-		inv_sqrt2 * (qw + qz),
-		inv_sqrt2 * (qx + qy),
-		inv_sqrt2 * (qx - qy),
-		inv_sqrt2 * (qw - qz)
+		inv_sqrt2 * (qw + qz),   // w
+		inv_sqrt2 * (qx + qy),   // x
+		inv_sqrt2 * (qx - qy),   // y
+		inv_sqrt2 * (qw - qz)    // z
 	};
 
-	// Normalize the quaternion
+	// Normalize to unit length (required for valid quaternion)
 	double norm = std::sqrt(q_enu[0]*q_enu[0] + q_enu[1]*q_enu[1] +
 				q_enu[2]*q_enu[2] + q_enu[3]*q_enu[3]);
 	if (norm > 1e-9) {
@@ -132,7 +143,10 @@ void Visualizer::vehicleLocalPositionCallback(const px4_msgs::msg::VehicleLocalP
 	}
 	_last_local_pos_update = now_sec;
 
-	// NED -> ENU: swap x/y, negate z
+	// NED -> ENU conversion:
+	//   ENU_x = NED_y (East)
+	//   ENU_y = NED_x (North)
+	//   ENU_z = -NED_z (Up instead of Down)
 	_vehicle_position[0] = msg->y;
 	_vehicle_position[1] = msg->x;
 	_vehicle_position[2] = -msg->z;
@@ -246,6 +260,7 @@ visualization_msgs::msg::Marker Visualizer::createArrowMarker(
 
 } // namespace precision_land
 
+// Entry point — standalone node (not a PX4 mode, just a visualizer)
 int main(int argc, char* argv[])
 {
 	rclcpp::init(argc, argv);

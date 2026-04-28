@@ -1,3 +1,13 @@
+/**
+ * FrontApproachPrecisionLandCombined.cpp — Two-camera approach + precision land
+ *
+ * State machine flow:
+ *   FrontSearch -> FrontApproach -> PrecisionDescend -> Finished
+ *                                  (or PrecisionApproach -> PrecisionDescend)
+ *
+ * Phase 1 (front camera): Search for tag, PID-fly toward it
+ * Phase 2 (downward camera): Descend onto the target
+ */
 #include "FrontApproachPrecisionLandCombined.hpp"
 
 #include <px4_ros2/components/node_with_mode.hpp>
@@ -15,11 +25,14 @@ FrontApproachPrecisionLandCombined::FrontApproachPrecisionLandCombined(rclcpp::N
 {
 	setSkipMessageCompatibilityCheck();
 
+	// PX4 ROS 2 interface objects
 	_vehicle_local_position = std::make_shared<px4_ros2::OdometryLocalPosition>(*this);
 	_vehicle_attitude = std::make_shared<px4_ros2::OdometryAttitude>(*this);
 	_trajectory_setpoint = std::make_shared<px4_ros2::TrajectorySetpointType>(*this);
 
 	auto qos = rclcpp::QoS(1).best_effort();
+
+	// Subscribe to BOTH cameras' tag detections
 	_front_target_sub = _node.create_subscription<geometry_msgs::msg::PoseStamped>(
 		"/front/target_pose", qos,
 		std::bind(&FrontApproachPrecisionLandCombined::frontTargetCallback, this, std::placeholders::_1));
@@ -28,16 +41,29 @@ FrontApproachPrecisionLandCombined::FrontApproachPrecisionLandCombined(rclcpp::N
 		"/target_pose", qos,
 		std::bind(&FrontApproachPrecisionLandCombined::downTargetCallback, this, std::placeholders::_1));
 
+	// Subscribe to PX4's landing detector
 	_land_detected_sub = _node.create_subscription<px4_msgs::msg::VehicleLandDetected>(
 		"/fmu/out/vehicle_land_detected", qos,
 		std::bind(&FrontApproachPrecisionLandCombined::landDetectedCallback, this, std::placeholders::_1));
 
+	// Publish current state on /drone_state for debugging — reliable so each
+	// transition is seen by `ros2 topic echo` even under message load
+	_drone_state_publisher = _node.create_publisher<std_msgs::msg::String>(
+		"/drone_state", rclcpp::QoS(10));
+
+	// Publish commanded-minus-actual position error on /tracking_error so we can
+	// see whether PX4 is actually following our position setpoints
+	_tracking_error_publisher = _node.create_publisher<geometry_msgs::msg::Vector3Stamped>(
+		"/tracking_error", rclcpp::QoS(10));
+
+	// Front camera: optical Z=forward, X=right, Y=down -> body X=forward, Y=right, Z=down
 	Eigen::Matrix3d front_matrix;
 	front_matrix << 0, 0, 1,
 			1, 0, 0,
 			0, 1, 0;
 	_front_optical_to_body = Eigen::Quaterniond(front_matrix);
 
+	// Down camera: optical Z=down, X=right, Y=forward -> body frame
 	Eigen::Matrix3d down_matrix;
 	down_matrix << 0, -1, 0,
 			 1, 0, 0,
@@ -186,9 +212,10 @@ void FrontApproachPrecisionLandCombined::updateSetpoint(float dt_s)
 	case State::Idle:
 		break;
 
+	// --- Phase 1: Hover and wait for the front camera to see a tag ---
 	case State::FrontSearch: {
 		Eigen::Vector3f hold = _vehicle_local_position->positionNed();
-		_trajectory_setpoint->updatePosition(hold);
+		commandPosition(hold);
 
 		if (_front_tag.valid() && !front_lost) {
 			switchToState(State::FrontApproach);
@@ -196,6 +223,7 @@ void FrontApproachPrecisionLandCombined::updateSetpoint(float dt_s)
 		break;
 	}
 
+	// --- Phase 1: PID-fly toward the front tag, stop at hold distance ---
 	case State::FrontApproach: {
 		if (front_lost) {
 			resetFrontController();
@@ -206,9 +234,11 @@ void FrontApproachPrecisionLandCombined::updateSetpoint(float dt_s)
 		Eigen::Vector3d vehicle_pos = _vehicle_local_position->positionNed().cast<double>();
 		Eigen::Vector3d tag_pos = _front_tag.position;
 
+		// Vector from drone to tag
 		Eigen::Vector3d to_tag = tag_pos - vehicle_pos;
 		Eigen::Vector2d delta_xy(to_tag.x(), to_tag.y());
 
+		// Compute desired offset: approach tag but stop at hold_distance
 		Eigen::Vector2d desired_xy = delta_xy;
 		const double distance_xy = delta_xy.norm();
 
@@ -226,32 +256,39 @@ void FrontApproachPrecisionLandCombined::updateSetpoint(float dt_s)
 			static_cast<float>(vehicle_pos.y() + desired_xy.y()),
 			static_cast<float>(tag_pos.z()));
 
+		// --- PID controller for XY velocity ---
 		Eigen::Vector2d error_xy(
 			target_position.x() - _vehicle_local_position->positionNed().x(),
 			target_position.y() - _vehicle_local_position->positionNed().y());
 
+		// Integral (clamped for anti-windup)
 		_front_integral_xy += error_xy * dt_s;
 		_front_integral_xy = _front_integral_xy.cwiseMax(-Eigen::Vector2d::Constant(_param_front_int_limit))
 					.cwiseMin(Eigen::Vector2d::Constant(_param_front_int_limit));
 
+		// Derivative
 		Eigen::Vector2d derivative_xy = Eigen::Vector2d::Zero();
 		if (_front_has_prev_error && dt_s > 1e-3f) {
 			derivative_xy = (error_xy - _front_prev_error_xy) / dt_s;
 		}
 
+		// PID output
 		Eigen::Vector2d vel_xy = _param_front_kp * error_xy
 					    + _param_front_ki * _front_integral_xy
 					    + _param_front_kd * derivative_xy;
 
+		// Clamp to max velocity
 		double vel_norm = vel_xy.norm();
 		if (vel_norm > _param_front_max_vel) {
 			vel_xy = vel_xy.normalized() * _param_front_max_vel;
 		}
 
+		// Simple P control for altitude
 		float error_z = target_position.z() - _vehicle_local_position->positionNed().z();
 		float vel_z = _param_front_kp_z * error_z;
 		vel_z = std::clamp(vel_z, -_param_front_max_vel_z, _param_front_max_vel_z);
 
+		// Send velocity command, pointing nose toward tag
 		Eigen::Vector3f velocity_cmd(static_cast<float>(vel_xy.x()), static_cast<float>(vel_xy.y()), vel_z);
 		float desired_yaw = std::atan2(to_tag.y(), to_tag.x());
 		_trajectory_setpoint->update(velocity_cmd, std::nullopt, desired_yaw);
@@ -259,28 +296,31 @@ void FrontApproachPrecisionLandCombined::updateSetpoint(float dt_s)
 		_front_prev_error_xy = error_xy;
 		_front_has_prev_error = true;
 
+		// Once at hold distance, switch to precision descent phase
 		if (positionReached(target_position)) {
 			resetFrontController();
-			_down_tag = {};
+			_down_tag = {};  // Clear stale downward detections
 			switchToState(State::PrecisionDescend);
 		}
 		break;
 	}
 
+	// --- Phase 2 (optional): Center above the tag using downward camera ---
 	case State::PrecisionApproach: {
-      
 		if (down_lost) {
+			// Lost the downward tag — hold position until we see it again
 			Eigen::Vector3f hold = _vehicle_local_position->positionNed();
-			_trajectory_setpoint->updatePosition(hold);
+			commandPosition(hold);
 			break;
 		}
 
+		// Fly to directly above the tag at current altitude
 		Eigen::Vector3f target(
-		static_cast<float>(_down_tag.position.x()),
-		static_cast<float>(_down_tag.position.y()),
-		_vehicle_local_position->positionNed().z());
+			static_cast<float>(_down_tag.position.x()),
+			static_cast<float>(_down_tag.position.y()),
+			_vehicle_local_position->positionNed().z());
 
-		_trajectory_setpoint->updatePosition(target);
+		commandPosition(target);
 
 		if (positionReached(target)) {
 			switchToState(State::PrecisionDescend);
@@ -288,7 +328,9 @@ void FrontApproachPrecisionLandCombined::updateSetpoint(float dt_s)
 		break;
 	}
 
+	// --- Phase 2: Descend at constant velocity until touchdown ---
 	case State::PrecisionDescend: {
+		// Positive z velocity = downward in NED
 		Eigen::Vector3f velocity(0.f, 0.f, _param_precision_descent_vel);
 		_trajectory_setpoint->update(velocity, std::nullopt, 0.0f);
 
@@ -298,9 +340,10 @@ void FrontApproachPrecisionLandCombined::updateSetpoint(float dt_s)
 		break;
 	}
 
+	// --- Landed — hold position and report success ---
 	case State::Finished: {
 		Eigen::Vector3f hold = _vehicle_local_position->positionNed();
-		_trajectory_setpoint->updatePosition(hold);
+		commandPosition(hold);
 		ModeBase::completed(px4_ros2::Result::Success);
 		break;
 	}
@@ -310,6 +353,7 @@ void FrontApproachPrecisionLandCombined::updateSetpoint(float dt_s)
 
 FrontApproachPrecisionLandCombined::ArucoTag FrontApproachPrecisionLandCombined::transformFrontTag(const ArucoTag& tag) const
 {
+	// Transform chain: world <- drone <- front camera <- tag
 	ArucoTag world = tag;
 
 	if (!tag.valid()) {
@@ -332,6 +376,7 @@ FrontApproachPrecisionLandCombined::ArucoTag FrontApproachPrecisionLandCombined:
 
 FrontApproachPrecisionLandCombined::ArucoTag FrontApproachPrecisionLandCombined::transformDownTag(const ArucoTag& tag) const
 {
+	// Transform chain: world <- drone <- downward camera <- tag
 	ArucoTag world = tag;
 
 	if (!tag.valid()) {
@@ -377,9 +422,12 @@ bool FrontApproachPrecisionLandCombined::positionReached(const Eigen::Vector3f& 
 
 Eigen::Vector2f FrontApproachPrecisionLandCombined::calculatePrecisionVelocityXY()
 {
+	// PI controller to keep centered over the downward tag during descent.
+	// Error = drone position minus tag position (positive = drone is past the tag)
 	float delta_pos_x = _vehicle_local_position->positionNed().x() - static_cast<float>(_down_tag.position.x());
 	float delta_pos_y = _vehicle_local_position->positionNed().y() - static_cast<float>(_down_tag.position.y());
 
+	// Accumulate integral (clamped for anti-windup)
 	_precision_integral_x += delta_pos_x;
 	_precision_integral_y += delta_pos_y;
 
@@ -387,6 +435,7 @@ Eigen::Vector2f FrontApproachPrecisionLandCombined::calculatePrecisionVelocityXY
 	_precision_integral_x = std::clamp(_precision_integral_x, -max_integral, max_integral);
 	_precision_integral_y = std::clamp(_precision_integral_y, -max_integral, max_integral);
 
+	// Negative sign: move TOWARD the tag (reduce error)
 	float vx = -1.f * (delta_pos_x * _param_precision_kp + _precision_integral_x * _param_precision_ki);
 	float vy = -1.f * (delta_pos_y * _param_precision_kp + _precision_integral_y * _param_precision_ki);
 
@@ -410,11 +459,30 @@ void FrontApproachPrecisionLandCombined::switchToState(State state)
 	}
 
 	RCLCPP_INFO(_node.get_logger(), "Switching to %s", stateName(state).c_str());
+
+	std_msgs::msg::String state_msg;
+	state_msg.data = stateName(state);
+	_drone_state_publisher->publish(state_msg);
+
 	_state = state;
 
 	if (state == State::FrontSearch) {
 		resetFrontController();
 	}
+}
+
+void FrontApproachPrecisionLandCombined::commandPosition(const Eigen::Vector3f& pos)
+{
+	_trajectory_setpoint->updatePosition(pos);
+
+	const auto actual = _vehicle_local_position->positionNed();
+	geometry_msgs::msg::Vector3Stamped err;
+	err.header.stamp = _node.now();
+	err.header.frame_id = "odom";
+	err.vector.x = pos.x() - actual.x();
+	err.vector.y = pos.y() - actual.y();
+	err.vector.z = pos.z() - actual.z();
+	_tracking_error_publisher->publish(err);
 }
 
 std::string FrontApproachPrecisionLandCombined::stateName(State state) const
@@ -439,6 +507,7 @@ std::string FrontApproachPrecisionLandCombined::stateName(State state) const
 
 } // namespace precision_land
 
+// Entry point — NodeWithMode registers our mode with PX4 and spins the ROS node
 int main(int argc, char* argv[])
 {
 	rclcpp::init(argc, argv);

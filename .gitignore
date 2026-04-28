@@ -4,3 +4,4 @@ log/
 .vscode
 .env
 rosbags/
+.cache/clangd
