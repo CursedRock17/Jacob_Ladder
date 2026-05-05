@@ -1,7 +1,9 @@
 build/
 install/
 log/
-.vscode
-.env
+*.vscode
+*.env
 rosbags/
+flight_rosbags/
 .cache/clangd
+.cache/

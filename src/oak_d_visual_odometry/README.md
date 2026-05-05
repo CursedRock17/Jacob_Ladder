@@ -71,6 +71,7 @@ Streams CAM_A (color) only.
 | Topic | Type | Notes |
 |---|---|---|
 | `/rgb/image` | `sensor_msgs/Image` | BGR8, 640x400 @ 30 fps |
+| `/rgb/camera_info` | `sensor_msgs/CameraInfo` | intrinsics from device flash, same stamp as image |
 
 ```bash
 ros2 run oak_d_visual_odometry rgb_publisher
@@ -87,6 +88,7 @@ gravity-aligned world frame. Use this for visualization in Foxglove.
 | `/tf` | `tf2_msgs/TFMessage` | `world` → `oak_camera` |
 | `/imu/data` | `sensor_msgs/Imu` | raw accel + gyro, 200 Hz |
 | `/rgb/image` | `sensor_msgs/Image` | CAM_A, BGR8, 30 fps |
+| `/rgb/camera_info` | `sensor_msgs/CameraInfo` | intrinsics from device flash, same stamp as image |
 
 ```bash
 ros2 run oak_d_visual_odometry vo_publisher_node
@@ -102,6 +104,7 @@ estimated by finite-difference of the NED position.
 | Topic | Type | Notes |
 |---|---|---|
 | (everything from `vo_publisher_node`) | | |
+| `/rgb/camera_info` | `sensor_msgs/CameraInfo` | same as above |
 | `/fmu/in/vehicle_visual_odometry` | `px4_msgs/VehicleOdometry` | NED pose, NED velocity, BEST_EFFORT QoS |
 
 ```bash

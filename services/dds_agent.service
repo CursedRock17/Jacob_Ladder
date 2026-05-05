@@ -1,0 +1,17 @@
+[Unit]
+Description=Micro-XRCE-DDS-Agent
+Wants=network.target
+#Requires=sys-devices-platform-bus\x400-3100000.serial-tty-ttyUSB0.device
+#After=sys-devices-platform-bus\x400-3100000.serial-tty-ttyUSB0.device syslog.target network-online.target
+
+[Service]
+Type=simple
+ExecStart=/bin/bash /etc/systemd/system/run_dds_agent.sh
+Restart=on-failure
+RestartSec=5
+StandardOutput=syslog
+StandardError=syslog
+SyslogIdentifier=dds_agent_service
+
+[Install]
+WantedBy=multi-user.target

@@ -2,6 +2,8 @@
 
 Real flights use an **Nvidia Jetson** as the companion computer, connected to a **Pixhawk Cube Orange+** flight controller via USB-to-TTL serial. You SSH into the Jetson from your laptop and run everything in a few terminal sessions.
 
+**Ensure**, that you've set up the Hardware correctly in the [setting_up_real_hardware section](./setting_up_real_hardware.md)
+
 ### Hardware Requirements
 
 - Nvidia Jetson Orin Nano Super Developer Kit
@@ -10,54 +12,13 @@ Real flights use an **Nvidia Jetson** as the companion computer, connected to a 
 - Optical flow sensor or other pose estimation source
 - Camera (e.g. OAK-D USB)
 
-### Generating the Firmware
-TODO: Make nicer statement:
-Essentially, we need to build our own firmware on a desired version (probably v1.16.0) and flash it to the flight controller in order to get desired physical setup. There are some saved versions in the [config](../config/firmware) firmware folder, but you may have to adjust.
-[PX4 docs](https://docs.px4.io/main/en/dev_setup/dev_env_linux_ubuntu) provide an official way for setting up firmware
-You may also have to clean out the old firmware as well, [through GIT](https://docs.px4.io/main/en/contribute/git_examples)
-
-1) Exit the docker container and find your desired PX4 variant. As of right now I don't know of a way to build in the docker container, for the real world. You may want a brand new variant of PX4 as to not muddle the two. Then navigate to your desired branch with changes you want:
-    ```bash
-    git clone https://github.com/PX4/PX4-Autopilot.git --recursive
-    cd PX4-Autopilot
-    git branch && git checkout v1.16.0
-    ```
-
-2) Setup the scripting environment on your system. For Ubuntu:
-    ```bash
-    bash ./Tools/setup/ubuntu.sh
-    ```
-
-3) Restart your computer to make sure it loads
-4) When you get back, navigate back to the PX4-Autopilot repository and build for you desired firmware ([OrangeCube+ on PX4](https://docs.px4.io/main/en/flight_controller/cubepilot_cube_orangeplus#building-firmware))
-    ```bash
-    make cubepilot_cubeorangeplus
-    ```
-
-    4a) If you get submodule complaints from the submodule repositories:
-    ```bash
-    git submodule sync recursive
-    git submodule update --init --recursive
-    ```
-
-### Wiring
-
-Connect the USB-to-TTL converter between the Jetson USB port and the Cube TELEM2 port:
-
-| Jetson | Cube |
-|---|---|
-| TX | RX |
-| RX | TX |
-| GND | GND |
-| **Do NOT connect 5V** | |
-
 ### PX4 Parameters
 
 Set these in QGroundControl, then reboot the flight controller:
 
 ```
-MAV_1_CONFIG   = TELEM1
-MAV_1_RATE     = 57600
+MAV_0_CONFIG   = TELEM1
+MAV_0_RATE     = 57600
 UXRCE_DDS_CFG  = TELEM2
 UXRCE_DDS_BAUD = 921600
 ```
@@ -89,7 +50,7 @@ You can double check by cycling through your modes to make sure they show up in 
 Now that our standard RC is all set up and you've verified the settings, we can connect to the Jetson over the WiFi hotpsot that it sets up.
 
 1) Power on the drone
-2) Check for the hotspot to come up (`nmcli device wifi list`)
+2) On the host PC, check for the hotspot to come up (`nmcli device wifi list`)
 3) Get access to the password for the hotspot (`export PASS=some_password`)
 4) Once the drone hotspot is up connect to it (`nmcli device wifi connect jacob-jetson password $PASS`)
 5) Once your on the network, shell into the drone (`ssh jacob@10.42.0.1`)
@@ -97,7 +58,38 @@ Now that our standard RC is all set up and you've verified the settings, we can 
 
 We can now move onto the steps of onboard nodes.
 
-#### 5 SSH Shells:
+#### Creating Services
+Ubuntu provides us with a wonderful library called `systemd` which provides us with [services](https://manpages.ubuntu.com/manpages/focal/man5/systemd.service.5.html), these services allow us to run commands on start up. This means we can automatically run shell scripts on power up which saves us time and terminals windows.
+
+You will find a variety of services in the [services directory](../services) which should already be availble on the drone, otherwise we'll need to add them. On the drone, complete the following steps:
+1) Grab the path to Jacob_Ladder's services and navigate to the lower level directory with any services required for the drone
+    ```bash
+    export LADDER_PATH=~/some_path/Jacob_Ladder/services
+    cd /etc/systemd/system
+    ```
+2) Copy over any services desired from the Jacob_Ladder directory into the path on your companion computer (Nvidia Jetson)
+    ```bash
+    cp -r ${LADDER_PATH} .
+    ```
+3) Assert that each service works before you try to enable it on boot 
+    ```bash
+    sudo systemctl start some_service
+    sudo systemctl status some_service
+    ```
+    When you run the `status` command, you'll get a status in header with either `active` or `inactive (dead)`, the services provided in the services directory were all tested to work, but you can always get odd behavior. You also get access to logs, ensure that these services work in their desired ways by making sure you're connections (i.e ROS 2 topics) are receiving the desired information, as the node can be `active` but not functioning correctly due to this like network access, user permissions, etc.
+5) After you've ensured each of your services work, for each service stop their current running process and enable those services to run on boot
+    ```bash
+    sudo systemctl stop some_service
+    sudo systemctl enable some_service
+    ```
+
+##### Current services
+There are a couple of services already set in the provided folder which run on boot of the devices (as of 05/2026):
+  - **dds_agent** : Opens a connection on the `/dev/ttyUSB0` port at 921600 baud, for the `MicroXRCEAgent`.
+  - **translation_node** : Sources and runs the node for translating old `px4_msgs` into their desired version.
+  - **usb_cam** : *Most likely* to be changed. Runs the VIO publisher for an OAK-D Pro camera at start to provide Visual Odometry capabilities to the EKF2.
+
+#### SSH Shells:
 There are various commands that we need to run in parallel when running our physical drone, that are almost identical to running in simulation. The reference for this code lives in the [launch_scripts section](../launch_scripts/super_real.sh)
 That command utilizes a [Terminal Multiplexor (tmux)](https://github.com/tmux/tmux/wiki) session that makes opening the various windows 10x easier, otherwise you'd have to open a new terminal, shell into it and give it new permissions. TMUX also allows you to resume sessions. 
 If for some reason you choose not to use tmux, you must remember to enter Jacob_Ladder and source the environment for each and every terminal:
@@ -107,7 +99,9 @@ If for some reason you choose not to use tmux, you must remember to enter Jacob_
 cd ~/path/to/Jacob_Ladder && source install/setup.bash
 ```
 
-**Shell 1 — DDS Agent** (bridges PX4 ↔ ROS 2)
+A couple of these shells have already been turned into services so there's less work for you to do, they just run on boot. They are still **required** to run, you just wouldn't have to run them as separate terminals. Also, they have a restart timer (typically 5 seconds) but can still fail like if the Serial-TTL converter isn't plugged in on boot, so just be wary as you can always fall back to extra terminals.
+
+**Shell 1 — DDS Agent** (bridges PX4 ↔ ROS 2) : **Optional shell** as it runs as a service currently
 As mentioned, the [uXRCE-DDS](https://docs.px4.io/main/en/middleware/uxrce_dds#uxrce-dds-px4-ros-2-dds-bridge)  serves as middleware, "to allow uORB messages to be published and subscriped on a companion computer (the jetson) as though they were ROS 2 topics"
 
 There are a few requirements to running the Agent:
@@ -119,14 +113,14 @@ There are a few requirements to running the Agent:
 MicroXRCEAgent serial --dev /dev/ttyUSB0 -b 921600
 ```
 
-**Shell 2 — Translation Node** (PX4 message version compatibility)
+**Shell 2 — Translation Node** (PX4 message version compatibility) : **Optional shell** as it runs as a service currently
 This translation node allows us to use ROS 2 applications compiled against different versions of the PX4 msgs.
 
 ```bash
 ros2 run translation_node translation_node_bin
 ```
 
-**Shell 3 — Camera Driver** (example: OAK-D)
+**Shell 3 — Camera Driver** (example: OAK-D) : **Optional shell** as it runs as a service currently
 This node is different than the simulation as Gazebo provides Camera sensors underneath the hood, so in the real world we need to run our own camera node. Most larger companies have ROS 2 wrappers for their camera SDK
 Luxonis provides [open source documentation](https://docs.luxonis.com/software-v3/depthai/ros/driver/) for their ROS 2 camera drivers that'll work with something like the OAK-D.
 We have to do a remap such that the camera provides the correct topics for the `aruco_tracker` remaps. It doesn't necessarily have to be done here, as long as both sides map, but this is useful if you're using more than one camera. You'd have to then remap for each of the cameras so that they each have different [namespaces](https://docs.ros.org/en/humble/Tutorials/Intermediate/Launch/Using-ROS2-Launch-For-Large-Projects.html#namespaces)

@@ -73,3 +73,5 @@ sudo rm -rf build
 sudo rm -rf /tmp/px4*
 ```
 - Losing Access to Position Hold due to lost Optical Flow in Flight -> Apply PR Fix [#26960](https://github.com/PX4/PX4-Autopilot/pull/26960)
+- ROS 2 Service outputs data, but fails to output to topics for the companion drone -> Make sure you have the correct user permissions in the system service, [like this tutorial](https://wiki.arcoslab.org/tutorials/starting_ros2_nodes_with_systemd)
+- Systemd nodes fail on startup for the Camera Publisher -> Ensure camera is plugged in on boot.

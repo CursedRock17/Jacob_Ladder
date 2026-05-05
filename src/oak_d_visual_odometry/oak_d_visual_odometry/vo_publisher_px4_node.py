@@ -29,7 +29,7 @@ import numpy as np
 
 from cv_bridge import CvBridge
 from geometry_msgs.msg import PoseStamped, TransformStamped
-from sensor_msgs.msg import Image, Imu
+from sensor_msgs.msg import CameraInfo, Image, Imu
 from tf2_ros import TransformBroadcaster
 
 import rclpy
@@ -68,6 +68,8 @@ class VoPublisherPx4Node(Node):
             Imu, "/imu/data", PUBLISHER_QUEUE_SIZE)
         self.image_publisher = self.create_publisher(
             Image, "/rgb/image", PUBLISHER_QUEUE_SIZE)
+        self.camera_info_publisher = self.create_publisher(
+            CameraInfo, "/rgb/camera_info", PUBLISHER_QUEUE_SIZE)
         self.tf_broadcaster = TransformBroadcaster(self)
 
         if PX4_AVAILABLE:
@@ -80,6 +82,7 @@ class VoPublisherPx4Node(Node):
                 "px4_msgs not importable; /fmu/in/vehicle_visual_odometry disabled")
 
         self.bridge = CvBridge()
+        self._camera_info = None
 
         # State for finite-difference velocity in NED.
         self._prev_p_ned = None
@@ -173,6 +176,8 @@ class VoPublisherPx4Node(Node):
                 p.start()
                 print("[vo_px4] pipeline running, entering drain loop", flush=True)
 
+                self._camera_info = self._read_camera_info(p, width, height)
+
                 n_imu = 0
                 n_pose = 0
                 n_rgb = 0
@@ -203,6 +208,36 @@ class VoPublisherPx4Node(Node):
             self.get_logger().error(f"DepthAI pipeline failed: {e}")
 
     # ---------- publishers ----------
+
+    def _read_camera_info(self, pipeline, width, height):
+        try:
+            calib = pipeline.getDefaultDevice().readCalibration()
+            K = calib.getCameraIntrinsics(dai.CameraBoardSocket.CAM_A, width, height)
+            d = list(calib.getDistortionCoefficients(dai.CameraBoardSocket.CAM_A))
+            msg = CameraInfo()
+            msg.width = width
+            msg.height = height
+            msg.distortion_model = "rational_polynomial" if len(d) > 5 else "plumb_bob"
+            msg.d = d
+            msg.k = [K[0][0], K[0][1], K[0][2],
+                     K[1][0], K[1][1], K[1][2],
+                     K[2][0], K[2][1], K[2][2]]
+            msg.r = [1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0]
+            msg.p = [K[0][0], K[0][1], K[0][2], 0.0,
+                     K[1][0], K[1][1], K[1][2], 0.0,
+                     K[2][0], K[2][1], K[2][2], 0.0]
+            print(f"[vo_px4] calibration: "
+                  f"fx={K[0][0]:.1f} fy={K[1][1]:.1f} "
+                  f"cx={K[0][2]:.1f} cy={K[1][2]:.1f} "
+                  f"d={len(d)} coeffs", flush=True)
+            return msg
+        except Exception as e:
+            print(f"[vo_px4] WARNING: calibration read failed ({e!r}); "
+                  f"camera_info will have zero intrinsics", flush=True)
+            msg = CameraInfo()
+            msg.width = width
+            msg.height = height
+            return msg
 
     def _now(self):
         return self.get_clock().now().to_msg()
@@ -320,6 +355,10 @@ class VoPublisherPx4Node(Node):
         msg.header.stamp = self._now()
         msg.header.frame_id = "oak_camera"
         self.image_publisher.publish(msg)
+
+        if self._camera_info is not None:
+            self._camera_info.header = msg.header
+            self.camera_info_publisher.publish(self._camera_info)
 
     def destroy_node(self):
         self._stop.set()
