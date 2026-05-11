@@ -1,6 +1,6 @@
 #!/bin/bash
 
-container_name="jacob_drone"
+container_name="capstone_drone"
 user="user"
 
 # Tab names

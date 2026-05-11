@@ -1,11 +1,13 @@
 [Unit]
 Description=Micro-XRCE-DDS-Agent
-Wants=network.target
+After=network-online.target
 #Requires=sys-devices-platform-bus\x400-3100000.serial-tty-ttyUSB0.device
 #After=sys-devices-platform-bus\x400-3100000.serial-tty-ttyUSB0.device syslog.target network-online.target
 
 [Service]
 Type=simple
+User=jacob
+Group=jacob
 ExecStart=/bin/bash /etc/systemd/system/run_dds_agent.sh
 Restart=on-failure
 RestartSec=5

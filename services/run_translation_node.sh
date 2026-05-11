@@ -1,7 +1,8 @@
 #!/bin/bash
+# Source our Environment
 source /opt/ros/humble/setup.bash
-source /home/jacob/Jacob_Ladder/install/setup.bash
-#export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:$PATH
+cd /home/jacob/Jacob_Ladder
+source install/setup.bash
 
-# Run the ROS2 usb_cam node with specified parameters
+# Run the ROS 2 PX4 translation_node
 ros2 run translation_node translation_node_bin

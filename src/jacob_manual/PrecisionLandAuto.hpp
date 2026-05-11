@@ -17,16 +17,16 @@
 #include <geometry_msgs/msg/quaternion.hpp>
 #include <vector>
 
-namespace precision_land
+namespace precision_land_auto
 {
 
-inline constexpr char kPrecisionLandModeName[] = "PrecisionLandCustom";
-inline constexpr bool kPrecisionLandDebugOutput = true;
+inline constexpr char kPrecisionLandAutoModeName[] = "PrecisionLandAutoCustom";
+inline constexpr bool kPrecisionLandAutoDebugOutput = true;
 
-class PrecisionLand : public px4_ros2::ModeBase
+class PrecisionLandAuto : public px4_ros2::ModeBase
 {
 public:
-	explicit PrecisionLand(rclcpp::Node& node);
+	explicit PrecisionLandAuto(rclcpp::Node& node);
 
 	void targetPoseCallback(const geometry_msgs::msg::PoseStamped::SharedPtr msg);
 	void vehicleLandDetectedCallback(const px4_msgs::msg::VehicleLandDetected::SharedPtr msg);
@@ -119,11 +119,11 @@ private:
 	float _vel_y_integral {};
 };
 
-// Executor: arms -> takeoff(1.25) -> schedules PrecisionLand mode -> waits for disarm
-class PrecisionLandExecutor : public px4_ros2::ModeExecutorBase
+// Executor: arms -> takeoff(1.25) -> schedules PrecisionLandAuto mode -> disarms
+class PrecisionLandAutoExecutor : public px4_ros2::ModeExecutorBase
 {
 public:
-	PrecisionLandExecutor(rclcpp::Node& node, px4_ros2::ModeBase& owned_mode);
+	PrecisionLandAutoExecutor(rclcpp::Node& node, px4_ros2::ModeBase& owned_mode);
 
 	enum class State {
 		Arming,
@@ -141,4 +141,4 @@ private:
 	rclcpp::Node& _node;
 };
 
-} // namespace precision_land
+} // namespace precision_land_auto

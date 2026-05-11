@@ -162,6 +162,8 @@ docker run -it --privileged \
 ```
 
 **Not** tested on MacOS
+**Maybe** If you running a windowing system other than X11 or notably running simulation with a GPU
+you may have to make `-e` and `-v` alterations to the the windowing and display sections to allow it run.
 
 Replace `/path/to` with your actual path to Jacob_Ladder, and `$CONTAINER_NAME` with whatever you'd like.
 

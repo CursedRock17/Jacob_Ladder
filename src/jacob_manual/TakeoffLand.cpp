@@ -166,11 +166,13 @@ void TakeoffLandMode::updateSetpoint(float dt_s)
 
 	// --- Descend at a constant velocity until PX4 detects landing ---
 	case State::Descending: {
+		// Current Poistion
+    Eigen::Vector3f current_position = _vehicle_local_position->positionNed();
 		// Positive z velocity = downward in NED
 		Eigen::Vector3f velocity(0.f, 0.f, _descent_vel);
 		_trajectory_setpoint->update(velocity, std::nullopt, 0.0f);
 
-		if (_land_detected) {
+		if (_land_detected || current_position.z() >= 0.10f) {
 			switchToState(State::Finished);
 		}
 		break;

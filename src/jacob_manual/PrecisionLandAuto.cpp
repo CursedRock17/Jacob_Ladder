@@ -1,4 +1,4 @@
-#include "PrecisionLand.hpp"
+#include "PrecisionLandAuto.hpp"
 
 #include <px4_ros2/components/node_with_mode.hpp>
 #include <px4_ros2/utils/geometry.hpp>
@@ -7,11 +7,11 @@
 
 using namespace px4_ros2::literals;
 
-namespace precision_land
+namespace precision_land_auto
 {
 
-PrecisionLand::PrecisionLand(rclcpp::Node& node)
-	: ModeBase(node, Settings{kPrecisionLandModeName, false})
+PrecisionLandAuto::PrecisionLandAuto(rclcpp::Node& node)
+	: ModeBase(node, Settings{kPrecisionLandAutoModeName, false})
 	, _node(node)
 {
 	setSkipMessageCompatibilityCheck();
@@ -23,15 +23,15 @@ PrecisionLand::PrecisionLand(rclcpp::Node& node)
 	_vehicle_attitude = std::make_shared<px4_ros2::OdometryAttitude>(*this);
 
 	_target_pose_sub = _node.create_subscription<geometry_msgs::msg::PoseStamped>("/target_pose",
-			   rclcpp::QoS(1).best_effort(), std::bind(&PrecisionLand::targetPoseCallback, this, std::placeholders::_1));
+			   rclcpp::QoS(1).best_effort(), std::bind(&PrecisionLandAuto::targetPoseCallback, this, std::placeholders::_1));
 
 	_vehicle_land_detected_sub = _node.create_subscription<px4_msgs::msg::VehicleLandDetected>("/fmu/out/vehicle_land_detected",
-				     rclcpp::QoS(1).best_effort(), std::bind(&PrecisionLand::vehicleLandDetectedCallback, this, std::placeholders::_1));
+				     rclcpp::QoS(1).best_effort(), std::bind(&PrecisionLandAuto::vehicleLandDetectedCallback, this, std::placeholders::_1));
 
 	loadParameters();
 }
 
-void PrecisionLand::loadParameters()
+void PrecisionLandAuto::loadParameters()
 {
 	_node.declare_parameter<float>("descent_vel", 1.0);
 	_node.declare_parameter<float>("vel_p_gain", 1.5);
@@ -61,12 +61,12 @@ void PrecisionLand::loadParameters()
 	RCLCPP_INFO(_node.get_logger(), "vel_i_gain: %f", _param_vel_i_gain);
 }
 
-void PrecisionLand::vehicleLandDetectedCallback(const px4_msgs::msg::VehicleLandDetected::SharedPtr msg)
+void PrecisionLandAuto::vehicleLandDetectedCallback(const px4_msgs::msg::VehicleLandDetected::SharedPtr msg)
 {
 	_land_detected = msg->landed;
 }
 
-void PrecisionLand::targetPoseCallback(const geometry_msgs::msg::PoseStamped::SharedPtr msg)
+void PrecisionLandAuto::targetPoseCallback(const geometry_msgs::msg::PoseStamped::SharedPtr msg)
 {
 	if (_search_started) {
 		auto tag = ArucoTag {
@@ -81,7 +81,7 @@ void PrecisionLand::targetPoseCallback(const geometry_msgs::msg::PoseStamped::Sh
 
 }
 
-PrecisionLand::ArucoTag PrecisionLand::getTagWorld(const ArucoTag& tag)
+PrecisionLandAuto::ArucoTag PrecisionLandAuto::getTagWorld(const ArucoTag& tag)
 {
 	// Convert from optical to NED
 	// Optical: X right, Y down, Z away from lens
@@ -109,7 +109,7 @@ PrecisionLand::ArucoTag PrecisionLand::getTagWorld(const ArucoTag& tag)
 	return world_tag;
 }
 
-void PrecisionLand::onActivate()
+void PrecisionLandAuto::onActivate()
 {
 	_base_position = _vehicle_local_position->positionNed();
 	_hold_position = _base_position;
@@ -121,16 +121,16 @@ void PrecisionLand::onActivate()
 	switchToState(State::OpticalFlowInit);
 
 	RCLCPP_INFO(_node.get_logger(),
-		"PrecisionLand active — optical flow init at %.2f m, then climb to %.1f m",
+		"PrecisionLandAuto active — optical flow init at %.2f m, then climb to %.1f m",
 		_optical_flow_height, _target_height);
 }
 
-void PrecisionLand::onDeactivate()
+void PrecisionLandAuto::onDeactivate()
 {
 	// No-op
 }
 
-void PrecisionLand::updateSetpoint(float dt_s)
+void PrecisionLandAuto::updateSetpoint(float dt_s)
 {
 	_state_elapsed += dt_s;
 
@@ -304,7 +304,7 @@ void PrecisionLand::updateSetpoint(float dt_s)
 	} // end switch/case
 }
 
-Eigen::Vector2f PrecisionLand::calculateVelocitySetpointXY()
+Eigen::Vector2f PrecisionLandAuto::calculateVelocitySetpointXY()
 {
 	float p_gain = _param_vel_p_gain;
 	float i_gain = _param_vel_i_gain;
@@ -336,7 +336,7 @@ Eigen::Vector2f PrecisionLand::calculateVelocitySetpointXY()
 	return Eigen::Vector2f(vx, vy);
 }
 
-bool PrecisionLand::checkTargetTimeout()
+bool PrecisionLandAuto::checkTargetTimeout()
 {
 	if (!_tag.valid()) {
 		return true;
@@ -349,7 +349,7 @@ bool PrecisionLand::checkTargetTimeout()
 	return false;
 }
 
-void PrecisionLand::generateSearchWaypoints()
+void PrecisionLandAuto::generateSearchWaypoints()
 {
 	// Generate spiral search waypoints
 	// The search waypoints are generated in the NED frame
@@ -410,7 +410,7 @@ void PrecisionLand::generateSearchWaypoints()
 	_search_waypoints = waypoints;
 }
 
-bool PrecisionLand::positionReached(const Eigen::Vector3f& target) const
+bool PrecisionLandAuto::positionReached(const Eigen::Vector3f& target) const
 {
 	auto position = _vehicle_local_position->positionNed();
 	auto velocity = _vehicle_local_position->velocityNed();
@@ -420,7 +420,7 @@ bool PrecisionLand::positionReached(const Eigen::Vector3f& target) const
 	return (delta_pos.norm() < _param_delta_position) && (velocity.norm() < _param_delta_velocity);
 }
 
-std::string PrecisionLand::stateName(State state)
+std::string PrecisionLandAuto::stateName(State state)
 {
 	switch (state) {
 	case State::OpticalFlowInit:
@@ -449,32 +449,32 @@ std::string PrecisionLand::stateName(State state)
 	}
 }
 
-void PrecisionLand::switchToState(State state)
+void PrecisionLandAuto::switchToState(State state)
 {
 	RCLCPP_INFO(_node.get_logger(), "Switching to %s", stateName(state).c_str());
 	_state = state;
 }
 
-// ── Executor: arm -> takeoff(1.25) -> schedule mode -> wait for disarm ──
+// ── Executor: arm -> takeoff(1.25) -> schedule mode -> disarm ──
 
-PrecisionLandExecutor::PrecisionLandExecutor(rclcpp::Node& node, px4_ros2::ModeBase& owned_mode)
+PrecisionLandAutoExecutor::PrecisionLandAutoExecutor(rclcpp::Node& node, px4_ros2::ModeBase& owned_mode)
 	: ModeExecutorBase(node, ModeExecutorBase::Settings{Settings::Activation::ActivateAlways}, owned_mode)
 	, _node(node)
 {
 	setSkipMessageCompatibilityCheck();
 }
 
-void PrecisionLandExecutor::onActivate()
+void PrecisionLandAutoExecutor::onActivate()
 {
-	RCLCPP_INFO(_node.get_logger(), "PrecisionLand executor — arming");
+	RCLCPP_INFO(_node.get_logger(), "PrecisionLandAuto executor — arming");
 	runState(State::Arming, px4_ros2::Result::Success);
 }
 
-void PrecisionLandExecutor::onDeactivate(DeactivateReason reason)
+void PrecisionLandAutoExecutor::onDeactivate(DeactivateReason reason)
 {
 }
 
-void PrecisionLandExecutor::runState(State state, px4_ros2::Result result)
+void PrecisionLandAutoExecutor::runState(State state, px4_ros2::Result result)
 {
 	if (result != px4_ros2::Result::Success) {
 		RCLCPP_ERROR(_node.get_logger(), "State %i failed: %s", (int)state,
@@ -502,20 +502,20 @@ void PrecisionLandExecutor::runState(State state, px4_ros2::Result result)
 	case State::Disarming:
 		RCLCPP_INFO(_node.get_logger(), "Landed — disarming");
 		disarm([this](px4_ros2::Result r) {
-			RCLCPP_INFO(_node.get_logger(), "Disarmed — PrecisionLand complete");
+			RCLCPP_INFO(_node.get_logger(), "Disarmed — PrecisionLandAuto complete");
 		});
 		break;
 	}
 }
 
-} // namespace precision_land
+} // namespace precision_land_auto
 
 int main(int argc, char* argv[])
 {
 	rclcpp::init(argc, argv);
 	rclcpp::spin(std::make_shared<px4_ros2::NodeWithModeExecutor<
-		precision_land::PrecisionLandExecutor, precision_land::PrecisionLand>>(
-		precision_land::kPrecisionLandModeName, precision_land::kPrecisionLandDebugOutput));
+		precision_land_auto::PrecisionLandAutoExecutor, precision_land_auto::PrecisionLandAuto>>(
+		precision_land_auto::kPrecisionLandAutoModeName, precision_land_auto::kPrecisionLandAutoDebugOutput));
 	rclcpp::shutdown();
 	return 0;
 }
