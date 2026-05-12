@@ -23,10 +23,6 @@ lucaswendland/jacob_ladder:latest bash
 
 ## Changes to PX4
 
-### More issues:
-- TODO: Don't run most of the code on the docker when running the physical drone. Run as many containers
-possible in the ssh'd terminals.
-
 ### Adding the ARKFlow
 New:
     "Need to adjust the position of the Optical Flow Sensor Relative to the CG"
@@ -75,3 +71,24 @@ sudo rm -rf /tmp/px4*
 - Losing Access to Position Hold due to lost Optical Flow in Flight -> Apply PR Fix [#26960](https://github.com/PX4/PX4-Autopilot/pull/26960)
 - ROS 2 Service outputs data, but fails to output to topics for the companion drone -> Make sure you have the correct user permissions in the system service, [like this tutorial](https://wiki.arcoslab.org/tutorials/starting_ros2_nodes_with_systemd)
 - Systemd nodes fail on startup for the Camera Publisher -> Ensure camera is plugged in on boot.
+- Couldn't use an External Mode Executor due to `setSkipMessageCompatibilityCheck()` failing to exist in the executor -> Added the correct additions in two files:
+
+```cpp
+// px4_ros2_cpp/include/px4_ros2/components/mode_executor.hpp - Line 135
+protected:
+  void setSkipMessageCompatibilityCheck() {_skip_message_compatibility_check = true;}
+
+private:
+  bool _skip_message_compatibility_check{false};
+
+```
+
+```cpp
+// px4_ros2_cpp/src/components/mode_executor.cpp - Line 56
+  if (!_skip_message_compatibility_check && (!waitForFMU(node(), 15s, _topic_namespace_prefix) ||
+    !messageCompatibilityCheck(node(), {ALL_PX4_ROS2_MESSAGES}, _topic_namespace_prefix)))
+  {
+    return false;
+  }
+
+```

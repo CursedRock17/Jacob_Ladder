@@ -24,6 +24,7 @@ def generate_launch_description():
         cmd=[
             'ros2', 'bag', 'record',
             '-a',
+            '--exclude', '/.*image_raw|/.*compressed|/.*theora|/.*h264|/.*depth|/.*color/image',
             '-s', 'mcap',
             '-o', bag_dir,
         ],

@@ -446,14 +446,15 @@ void PrecisionLand::sendDisarm()
 	px4_msgs::msg::VehicleCommand cmd{};
 	cmd.timestamp = _node.now().nanoseconds() / 1000;
 	cmd.command = px4_msgs::msg::VehicleCommand::VEHICLE_CMD_COMPONENT_ARM_DISARM;
-	cmd.param1 = 0.0f;  // 0 = disarm
+	cmd.param1 = 0.0f;     // 0 = disarm
+	cmd.param2 = 21196.0f; // force-disarm: bypasses PX4 safety checks when landed
 	cmd.target_system = 1;
 	cmd.target_component = 1;
 	cmd.source_system = 1;
 	cmd.source_component = 1;
 	cmd.from_external = true;
 	_vehicle_command_pub->publish(cmd);
-	RCLCPP_INFO(_node.get_logger(), "Disarm command sent");
+	RCLCPP_INFO(_node.get_logger(), "Force disarm command sent");
 }
 
 void PrecisionLand::switchToState(State state)

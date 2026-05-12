@@ -121,7 +121,7 @@ class PoseEstimationNode(Node):
     def apply_pc_and_norm(self, rng4, pc=None):
         # Adjust if needed
         if pc is None:
-            pc = self.pc
+            pc = self.PC
         out = list(rng4)
         v = np.array(out[:3], dtype=float) + pc
         out[:3] = v.tolist()
@@ -207,7 +207,7 @@ class PoseEstimationNode(Node):
 
         # Same output shape as your original Snapshot(): 8 values
         snapshot_out = coupler_out + drogue_out
-        self.get_logger().info(f"RANGE: {snapshot_out}")
+        self.get_logger().debug(f"RANGE: {snapshot_out}")
 
         # Decide which to use for pose (prefer drogue if available)
         if drogue_det is not None:
@@ -237,7 +237,7 @@ class PoseEstimationNode(Node):
 
         self.pose_publisher.publish(pose_msg)
 
-        self.get_logger().info(
+        self.get_logger().debug(
             f"Published pose to {target}: "
             f"[{pose_data[0]:.2f}, {pose_data[1]:.2f}, {pose_data[2]:.2f}] "
             f"dist={pose_data[3]:.2f}")

@@ -119,7 +119,7 @@ private:
 	float _vel_y_integral {};
 };
 
-// Executor: arms -> takeoff(1.25) -> schedules PrecisionLandAuto mode -> disarms
+// Executor: arms -> schedules PrecisionLandAuto mode (mode handles climb) -> disarms
 class PrecisionLandAutoExecutor : public px4_ros2::ModeExecutorBase
 {
 public:
@@ -127,8 +127,7 @@ public:
 
 	enum class State {
 		Arming,
-		TakingOff,
-		Approaching,
+		Running,
 		Disarming,
 	};
 

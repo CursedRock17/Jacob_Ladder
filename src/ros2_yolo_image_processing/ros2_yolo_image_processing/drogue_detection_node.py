@@ -13,12 +13,9 @@ import cv2
 from cv_bridge import CvBridge
 from ultralytics import YOLO
 
-# GLOBALS ##
 # Your stream/frame size (used by ranging center math)
 FRAME_W = 1024
 FRAME_H = 768
-# Global PC offset (adjust if needed)
-PC = np.array([0.0, 0.0, 0.0], dtype=float)
 
 
 class DrogueDetectionNode(Node):
@@ -42,7 +39,12 @@ class DrogueDetectionNode(Node):
         self.IMGSZ = 416
         self.CONF = 0.25
         self.IOU = 0.45
-        self.DEVICE = "cpu"  # set to "0" if GPU works
+        # "cpu" for laptop/Pi, "0" for Jetson/CUDA GPU
+        self.DEVICE = self.declare_parameter('device', 'cpu').value
+
+        # Frame skip flag: if YOLO is still running on a previous frame, drop new ones
+        # rather than letting the subscription queue build up
+        self._busy = False
 
         # Frame Info (Timing) + Logger
         self.frame_idx = 0
@@ -62,7 +64,7 @@ class DrogueDetectionNode(Node):
         sensor_qos = qos_profile_sensor_data
         default_qos = qos_profile_system_default
 
-        # Create ROS 2 Parameters to handle some requirements on finding the drogue
+        # ROS 2 parameters for runtime tuning
         self.confidence_param = self.declare_parameter('min_score_thresh', self.CONF)
         self.iou_thresh_param = self.declare_parameter('iou_thresh', self.IOU)
 
@@ -115,9 +117,7 @@ class DrogueDetectionNode(Node):
         # if img_msg.encoding == BGR8:
         #    img = cv2.cvtColor(img, cv2.COLOR_BAYER_BGR2RGB)
 
-        # Run our DNN
-        results = YOLO(self.MODEL_FILEPATH).predict  # (avoid repeated model load? NO - see below)
-        # NOTE: We DO NOT want to reload the model. Using the existing model:
+        # Run inference on the already-loaded model
         results = self.dnn_model.predict(
             source=img,
             imgsz=self.IMGSZ,
@@ -232,27 +232,33 @@ class DrogueDetectionNode(Node):
         :returns:
             None
         """
-        # Run YOLO detection & Remove the "garbage"
-        img, yolo_results = self.process_image(img_msg)
+        # Drop frame if a previous inference is still running.
+        # This keeps latency bounded when YOLO is slower than the camera rate.
+        if self._busy:
+            return
+        self._busy = True
 
-        # Convert to ROS messages
-        detections_msg, annotated_img_msg = self.create_detections_msg(
-            img, yolo_results, img_msg)
+        try:
+            img, yolo_results = self.process_image(img_msg)
 
-        # Publish
-        self.detection_publisher.publish(detections_msg)
-        self.detected_image_publisher.publish(annotated_img_msg)
+            detections_msg, annotated_img_msg = self.create_detections_msg(
+                img, yolo_results, img_msg)
 
-        # FPS tracking
-        self.frame_idx += 1
-        camera_fps = 30
-        if self.frame_idx % camera_fps == 0:
-            current_time = self.get_clock().now()
-            dt = (current_time - self.t_last).nanoseconds / 1e9
-            fps = float(camera_fps) / max(dt, 1e-6)
-            self.get_logger().info(
-                f"FPS: {fps:.2f} | Detections: {len(detections_msg.detections)}")
-            self.t_last = current_time
+            self.detection_publisher.publish(detections_msg)
+            self.detected_image_publisher.publish(annotated_img_msg)
+
+            # FPS tracking
+            self.frame_idx += 1
+            camera_fps = 30
+            if self.frame_idx % camera_fps == 0:
+                current_time = self.get_clock().now()
+                dt = (current_time - self.t_last).nanoseconds / 1e9
+                fps = float(camera_fps) / max(dt, 1e-6)
+                self.get_logger().info(
+                    f"FPS: {fps:.2f} | Detections: {len(detections_msg.detections)}")
+                self.t_last = current_time
+        finally:
+            self._busy = False
 
 
 def main(args=None):

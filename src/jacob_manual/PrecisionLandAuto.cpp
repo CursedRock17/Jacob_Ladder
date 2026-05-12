@@ -484,23 +484,20 @@ void PrecisionLandAutoExecutor::runState(State state, px4_ros2::Result result)
 
 	switch (state) {
 	case State::Arming:
-		arm([this](px4_ros2::Result r) { runState(State::TakingOff, r); });
+		arm([this](px4_ros2::Result r) { runState(State::Running, r); });
 		break;
 
-	case State::TakingOff:
-		RCLCPP_INFO(_node.get_logger(), "Arm complete — takeoff");
-		takeoff([this](px4_ros2::Result r) { runState(State::Approaching, r); }, 1.25f);
-		break;
-
-	case State::Approaching:
-		RCLCPP_INFO(_node.get_logger(), "Takeoff complete — starting precision land");
+	case State::Running:
+		// Mode handles the full sequence: OpticalFlowInit -> Climbing -> Search ->
+		// Approach -> Descend -> Finished. No separate executor takeoff needed.
+		RCLCPP_INFO(_node.get_logger(), "Armed — starting precision land mode");
 		scheduleMode(ownedMode().id(), [this](px4_ros2::Result r) {
 			runState(State::Disarming, r);
 		});
 		break;
 
 	case State::Disarming:
-		RCLCPP_INFO(_node.get_logger(), "Landed — disarming");
+		RCLCPP_INFO(_node.get_logger(), "Mission complete — disarming");
 		disarm([this](px4_ros2::Result r) {
 			RCLCPP_INFO(_node.get_logger(), "Disarmed — PrecisionLandAuto complete");
 		});

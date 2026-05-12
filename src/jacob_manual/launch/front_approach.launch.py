@@ -19,20 +19,16 @@ def generate_launch_description():
         'drone.rviz'
     ])
 
-    bag_dir = 'flight_rosbags/' + f"flight_bag_{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}"
+    bag_dir = 'rosbags/' + f"flight_bag_{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}"
     ros2bag_node = ExecuteProcess(
         cmd=[
             'ros2', 'bag', 'record',
+            '-a',
+            '--exclude', '/.*image_raw|/.*compressed|/.*theora|/.*h264|/.*depth|/.*color/image',
             '-s', 'mcap',
             '-o', bag_dir,
-            '-a'
-            #'/front/camera/image_raw',
-            #'/front/image_proc',
-            #'/front/target_pose',
-            #'/fmu/out/vehicle_local_position',
-            #'/fmu/out/vehicle_status',
         ],
-        #output='screen'
+        output='screen'
     )
 
     return LaunchDescription([
@@ -58,27 +54,3 @@ def generate_launch_description():
             output='screen',
         ),
     ])
-
-
-"""
-Node(
-package='jacob_manual',
-executable='front_approach',
-name='front_approach',
-output='screen',
-parameters=[params]
-),
-Node(
-package='rviz2',
-executable='rviz2',
-name='rviz_node',
-output='screen',
-arguments=['-d', rviz_config_file]
-),
-Node(
-package='jacob_manual',
-executable='visualizer',
-name='visualizer',
-output='screen',
-),
-"""
