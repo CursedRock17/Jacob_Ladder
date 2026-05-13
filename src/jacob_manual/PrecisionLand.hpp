@@ -157,6 +157,7 @@ private:
 	float _optical_flow_hold_time = 3.0f;  // Hold time at flow height (seconds)
 	float _target_height = 2.5f;           // Search altitude (meters)
 	float _climb_rate = 0.3f;              // Climb speed (m/s)
+	float _param_land_z_tolerance = 0.15f; // Disarm when within this many meters of starting z
 };
 
 } // namespace precision_land

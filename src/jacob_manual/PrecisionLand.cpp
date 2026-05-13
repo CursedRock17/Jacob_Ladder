@@ -79,6 +79,7 @@ void PrecisionLand::loadParameters()
 	_node.declare_parameter<float>("optical_flow_hold_time", 3.0f);
 	_node.declare_parameter<float>("target_height", 2.5f);
 	_node.declare_parameter<float>("climb_rate", 0.3f);
+	_node.declare_parameter<float>("land_z_tolerance", 0.15f);
 
 	_node.get_parameter("descent_vel", _param_descent_vel);
 	_node.get_parameter("vel_p_gain", _param_vel_p_gain);
@@ -91,6 +92,7 @@ void PrecisionLand::loadParameters()
 	_node.get_parameter("optical_flow_hold_time", _optical_flow_hold_time);
 	_node.get_parameter("target_height", _target_height);
 	_node.get_parameter("climb_rate", _climb_rate);
+	_node.get_parameter("land_z_tolerance", _param_land_z_tolerance);
 }
 
 void PrecisionLand::targetPoseCallback(const geometry_msgs::msg::PoseStamped::SharedPtr msg)
@@ -299,7 +301,13 @@ void PrecisionLand::updateSetpoint(float dt_s)
 			std::nullopt,
 			px4_ros2::quaternionToYaw(_tag.orientation));
 
-		if (_land_detected) {
+		const float current_z = _vehicle_local_position->positionNed().z();
+		const bool near_ground = current_z >= (_base_position.z() - _param_land_z_tolerance);
+
+		if (_land_detected || near_ground) {
+			RCLCPP_INFO(_node.get_logger(),
+				"Landing detected (land_detected=%d, z=%.3f, base_z=%.3f)",
+				_land_detected, current_z, _base_position.z());
 			switchToState(State::Finished);
 		}
 		break;

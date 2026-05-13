@@ -39,18 +39,18 @@ def generate_launch_description():
             output='screen',
             parameters=[params]
         ),
-        Node(
-            package='rviz2',
-            executable='rviz2',
-            name='rviz_node',
-            output='screen',
-            arguments=['-d', rviz_config_file]
-        ),
-        Node(
-            package='jacob_manual',
-            executable='visualizer',
-            name='visualizer',
-            output='screen',
-        ),
-        #ros2bag_node,
+        #Node(
+        #    package='rviz2',
+        #    executable='rviz2',
+        #    name='rviz_node',
+        #    output='screen',
+        #    arguments=['-d', rviz_config_file]
+        #),
+        #Node(
+        #    package='jacob_manual',
+        #    executable='visualizer',
+        #    name='visualizer',
+        #    output='screen',
+        #),
+        ros2bag_node,
     ])

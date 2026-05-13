@@ -7,7 +7,23 @@ precision_land:
     target_timeout: 5.0
     delta_position: 0.2
     delta_velocity: 0.2
-    optical_flow_height: 0.5
-    optical_flow_hold_time: 3.0
+    optical_flow_height: 0.1
+    optical_flow_hold_time: 2.5
     target_height: 1.0
     climb_rate: 0.3
+    land_z_tolerance: 0.15
+
+precision_land_auto:
+  ros__parameters:
+    descent_vel: 0.6
+    vel_p_gain: 1.7
+    vel_i_gain: 0.0
+    max_velocity: 3.0
+    target_timeout: 5.0
+    delta_position: 0.2
+    delta_velocity: 0.2
+    optical_flow_height: 0.1
+    optical_flow_hold_time: 2.5
+    target_height: 1.0
+    climb_rate: 0.3
+    land_z_tolerance: 0.15

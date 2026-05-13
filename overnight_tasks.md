@@ -67,3 +67,7 @@ A list of directories **not** to be altered:
   > ros2 launch jacob_manual sim.launch.py executable:=precision_land params_file:=params.yaml
   > ```
   > Individual launch files kept intact for production/real-drone use. `super_real.sh` and `precision_land.sh` unchanged.
+
+  - [ ] Alter jacob_manual docs such that we include all of the modes
+  - [ ] Make sure our Mode Executor Docs are in the general docs sessino since newcomers will want ot start there
+  - [ ] I don't like having RViz (and the visualizer) enabled always for every file. Maybe we should add an in_sim configuration parameter to our launch files that get's checked so that we can turn them off.

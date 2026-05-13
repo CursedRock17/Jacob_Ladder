@@ -44,6 +44,7 @@ void PrecisionLandAuto::loadParameters()
 	_node.declare_parameter<float>("optical_flow_hold_time", 3.0f);
 	_node.declare_parameter<float>("target_height", 2.5f);
 	_node.declare_parameter<float>("climb_rate", 0.3f);
+	_node.declare_parameter<float>("land_z_tolerance", 0.15f);
 
 	_node.get_parameter("descent_vel", _param_descent_vel);
 	_node.get_parameter("vel_p_gain", _param_vel_p_gain);
@@ -56,6 +57,7 @@ void PrecisionLandAuto::loadParameters()
 	_node.get_parameter("optical_flow_hold_time", _optical_flow_hold_time);
 	_node.get_parameter("target_height", _target_height);
 	_node.get_parameter("climb_rate", _climb_rate);
+	_node.get_parameter("land_z_tolerance", _param_land_z_tolerance);
 
 	RCLCPP_INFO(_node.get_logger(), "descent_vel: %f", _param_descent_vel);
 	RCLCPP_INFO(_node.get_logger(), "vel_i_gain: %f", _param_vel_i_gain);
@@ -290,7 +292,13 @@ void PrecisionLandAuto::updateSetpoint(float dt_s)
 		_trajectory_setpoint->update(Eigen::Vector3f(vel.x(), vel.y(), _param_descent_vel), std::nullopt,
 					     px4_ros2::quaternionToYaw(_tag.orientation));
 
-		if (_land_detected) {
+		const float current_z = _vehicle_local_position->positionNed().z();
+		const bool near_ground = current_z >= -_param_land_z_tolerance;
+
+		if (_land_detected || near_ground) {
+			RCLCPP_INFO(_node.get_logger(),
+				"Landing detected (land_detected=%d, z=%.3f)",
+				_land_detected, current_z);
 			switchToState(State::Finished);
 		}
 
@@ -455,23 +463,52 @@ void PrecisionLandAuto::switchToState(State state)
 	_state = state;
 }
 
-// ── Executor: arm -> takeoff(1.25) -> schedule mode -> disarm ──
+// ── Executor: arm -> takeoff -> schedule mode -> disarm ──
 
 PrecisionLandAutoExecutor::PrecisionLandAutoExecutor(rclcpp::Node& node, px4_ros2::ModeBase& owned_mode)
 	: ModeExecutorBase(node, ModeExecutorBase::Settings{Settings::Activation::ActivateAlways}, owned_mode)
 	, _node(node)
 {
 	setSkipMessageCompatibilityCheck();
+
+	// Mode constructor already declared target_height; grab it here for altitude monitoring
+	if (_node.has_parameter("target_height")) {
+		_node.get_parameter("target_height", _target_height);
+	}
+	// In NED, z is negative when airborne. Trigger when within 0.2m of target height.
+	_takeoff_target_z = -(_target_height - 0.2f);
+
+	// Subscribe to local position so we can detect takeoff completion by altitude,
+	// since the PX4 takeoff() callback does not reliably fire at custom altitudes.
+	_local_pos_sub = _node.create_subscription<px4_msgs::msg::VehicleLocalPosition>(
+		"/fmu/out/vehicle_local_position",
+		rclcpp::QoS(1).best_effort(),
+		[this](const px4_msgs::msg::VehicleLocalPosition::SharedPtr msg) {
+			if (_in_takeoff && !_takeoff_complete && msg->z < _takeoff_target_z) {
+				_takeoff_complete = true;
+				_in_takeoff = false;
+				RCLCPP_INFO(_node.get_logger(),
+					"Takeoff altitude reached (z=%.2f) — starting precision land", msg->z);
+				runState(State::Approaching, px4_ros2::Result::Success);
+			}
+		});
 }
 
 void PrecisionLandAutoExecutor::onActivate()
 {
+	if (_mission_complete) {
+		RCLCPP_INFO(_node.get_logger(), "Mission already complete — ignoring re-activation");
+		return;
+	}
+	_in_takeoff = false;
+	_takeoff_complete = false;
 	RCLCPP_INFO(_node.get_logger(), "PrecisionLandAuto executor — arming");
 	runState(State::Arming, px4_ros2::Result::Success);
 }
 
 void PrecisionLandAutoExecutor::onDeactivate(DeactivateReason reason)
 {
+	_in_takeoff = false;
 }
 
 void PrecisionLandAutoExecutor::runState(State state, px4_ros2::Result result)
@@ -484,21 +521,35 @@ void PrecisionLandAutoExecutor::runState(State state, px4_ros2::Result result)
 
 	switch (state) {
 	case State::Arming:
-		arm([this](px4_ros2::Result r) { runState(State::Running, r); });
+		arm([this](px4_ros2::Result r) { runState(State::TakingOff, r); });
 		break;
 
-	case State::Running:
-		// Mode handles the full sequence: OpticalFlowInit -> Climbing -> Search ->
-		// Approach -> Descend -> Finished. No separate executor takeoff needed.
-		RCLCPP_INFO(_node.get_logger(), "Armed — starting precision land mode");
+	case State::TakingOff:
+		RCLCPP_INFO(_node.get_logger(), "Arm complete — taking off to %.1f m", _target_height);
+		_in_takeoff = true;
+		_takeoff_complete = false;
+		// takeoff() gets the drone airborne; position subscriber detects when height is reached
+		// because the built-in TAKEOFF callback does not fire at altitudes below MIS_TAKEOFF_ALT
+		takeoff([this](px4_ros2::Result r) {
+			if (!_takeoff_complete) {
+				_takeoff_complete = true;
+				_in_takeoff = false;
+				runState(State::Approaching, r);
+			}
+		}, _target_height);
+		break;
+
+	case State::Approaching:
+		RCLCPP_INFO(_node.get_logger(), "Takeoff complete — starting precision land");
 		scheduleMode(ownedMode().id(), [this](px4_ros2::Result r) {
 			runState(State::Disarming, r);
 		});
 		break;
 
 	case State::Disarming:
-		RCLCPP_INFO(_node.get_logger(), "Mission complete — disarming");
+		RCLCPP_INFO(_node.get_logger(), "Landed — disarming");
 		disarm([this](px4_ros2::Result r) {
+			_mission_complete = true;
 			RCLCPP_INFO(_node.get_logger(), "Disarmed — PrecisionLandAuto complete");
 		});
 		break;

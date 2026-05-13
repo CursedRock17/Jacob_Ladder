@@ -10,6 +10,7 @@
 
 #include <rclcpp/rclcpp.hpp>
 #include <geometry_msgs/msg/pose_stamped.hpp>
+#include <px4_msgs/msg/vehicle_local_position.hpp>
 #include <cmath>
 #include <tf2/LinearMath/Quaternion.h>
 #include <tf2/LinearMath/Matrix3x3.h>
@@ -114,12 +115,13 @@ private:
 	float _optical_flow_hold_time = 3.0f;
 	float _target_height = 2.5f;
 	float _climb_rate = 0.3f;
+	float _param_land_z_tolerance = 0.15f;
 
 	float _vel_x_integral {};
 	float _vel_y_integral {};
 };
 
-// Executor: arms -> schedules PrecisionLandAuto mode (mode handles climb) -> disarms
+// Executor: arms -> takeoff -> schedules PrecisionLandAuto mode -> disarms
 class PrecisionLandAutoExecutor : public px4_ros2::ModeExecutorBase
 {
 public:
@@ -127,7 +129,8 @@ public:
 
 	enum class State {
 		Arming,
-		Running,
+		TakingOff,
+		Approaching,
 		Disarming,
 	};
 
@@ -138,6 +141,15 @@ private:
 	void runState(State state, px4_ros2::Result result);
 
 	rclcpp::Node& _node;
+
+	// Monitors altitude to detect when takeoff is complete (PX4 callback unreliable)
+	rclcpp::Subscription<px4_msgs::msg::VehicleLocalPosition>::SharedPtr _local_pos_sub;
+	bool _in_takeoff = false;
+	bool _takeoff_complete = false;
+	float _target_height = 2.5f;
+	float _takeoff_target_z = -2.3f;
+	// Prevents ActivateAlways from re-arming after the mission finishes
+	bool _mission_complete = false;
 };
 
 } // namespace precision_land_auto
