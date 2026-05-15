@@ -3,6 +3,7 @@ install/
 log/
 *.vscode
 *.env
+jacob_ladder.env
 rosbags/
 flight_rosbags/
 .cache/clangd
