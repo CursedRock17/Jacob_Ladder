@@ -52,8 +52,8 @@ def generate_launch_description():
 
     # Add in all our separate commands into one general launch command
     return LaunchDescription([
-        mpa_to_ros2,
-        drogue_flight_agro,
+        #mpa_to_ros2,
+        #drogue_flight_agro,
         drogue_ranging,
-        ros2bag_node,
+        #ros2bag_node,
     ])

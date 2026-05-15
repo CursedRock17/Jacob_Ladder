@@ -96,5 +96,5 @@ def generate_launch_description():
         #foxglove,
         drogue_detection_node,
         pose_estimation_node,
-        ros2bag
+        #ros2bag
     ])
