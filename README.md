@@ -109,8 +109,9 @@ Download the daily build: https://docs.qgroundcontrol.com/master/en/qgc-user-gui
 ### 3. Clone Jacob's Ladder
 
 ```bash
-git clone https://github.com/Jacob-Safeer/Jacob_Ladder.git
+git clone https://github.com/CursedRock17/Jacob_Ladder.git
 cd Jacob_Ladder
+git checkout drogue_collector
 git submodule update --init --recursive
 ```
 
@@ -254,7 +255,7 @@ any and all tested forms of parameters are labelled in the [`config/params`](con
 
 ## Questions
 
-Email: jsafeer1@terpmail.umd.edu
+Email: lwendlan@umd.edu
 
 ## License
 
