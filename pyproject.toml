@@ -8,7 +8,9 @@ dependencies = [
     "cuvslam",
     "depthai",
     "numpy",
+    "ruff",
     "scipy",
+    "ty",
 ]
 
 [tool.uv.sources]
