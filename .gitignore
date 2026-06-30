@@ -1,4 +1,32 @@
+# ROS/colcon build outputs
 build/
 install/
 log/
-.vscode
+
+# Local configuration and secrets
+.env
+*.env
+jacob_ladder.env
+.vscode/
+*.code-workspace
+
+# Flight data generated during local runs
+rosbags/
+flight_rosbags/
+*.bag
+*.db3
+*.mcap
+
+# Tool and language caches
+.cache/
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# DepthAI generated caches and crash dumps
+.depthai_cached_models/

@@ -92,15 +92,15 @@
     </spherical_coordinates>
 
     <include>
-      <name>aruco_marker_ground_id0</name>
-      <uri>model://aruco_marker_id0</uri>
+      <name>aruco_marker_ground_id1</name>
+      <uri>model://aruco_marker_id1</uri>
       <pose>0 0 0.002 0 0 0</pose>
     </include>
 
     <!-- Perpendicular marker positioned 1 m above and 1 m (positive X) in front of the original marker -->
     <include>
-      <name>aruco_marker_vertical_id1</name>
-      <uri>model://aruco_marker_id1</uri>
+      <name>aruco_marker_vertical_id0</name>
+      <uri>model://aruco_marker_id0</uri>
       <pose>1.0 0 1.0 0 -1.57079632679 0</pose>
     </include>
   </world>

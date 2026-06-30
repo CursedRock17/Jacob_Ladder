@@ -1,6 +1,6 @@
 #!/bin/bash
 
-container_name="jacob_drone"
+container_name="capstone_drone"
 user="user"
 
 # Tab names
@@ -11,8 +11,8 @@ commands=(
     "cd /home/cursedrock17/Documents/Electrical/Matrix_Lab/jacob_drone_ws/src/PX4-Autopilot && make px4_sitl gz_x500_dual_cam_aruco_dual_ids"
     "cd /home/cursedrock17/Documents/Electrical/Matrix_Lab/jacob_drone_ws/src/Jacob_Ladder && source install/setup.bash && MicroXRCEAgent udp4 -p 8888"
     "cd /home/cursedrock17/Documents/Electrical/Matrix_Lab/jacob_drone_ws/src/Jacob_Ladder && source install/setup.bash && ros2 run translation_node translation_node_bin"
-    "cd /home/cursedrock17/Documents/Electrical/Matrix_Lab/jacob_drone_ws/src/Jacob_Ladder && source install/setup.bash && ros2 launch aruco_tracker front_camera_aruco.launch.py"
-    "cd /home/cursedrock17/Documents/Electrical/Matrix_Lab/jacob_drone_ws/src/Jacob_Ladder && source install/setup.bash && ros2 launch precision_land front_to_precision_land.launch.py"
+    "cd /home/cursedrock17/Documents/Electrical/Matrix_Lab/jacob_drone_ws/src/Jacob_Ladder && source install/setup.bash && ros2 launch aruco_tracker downward_camera_aruco.launch.py"
+    "cd /home/cursedrock17/Documents/Electrical/Matrix_Lab/jacob_drone_ws/src/Jacob_Ladder && source install/setup.bash && ros2 launch precision_land precision_land_auto.launch.py"
 )
 
 # Start gnome-terminal with the first tab
@@ -29,7 +29,7 @@ for i in "${!commands[@]}"; do
 
     # Add 20 sec delay only for Precision-Land
     if [ $i -eq 4 ]; then
-        docker_cmd="docker exec -it --user ${user} ${container_name} bash -c \"sleep 20; ${commands[$i]}\""
+        docker_cmd="docker exec -it --user ${user} ${container_name} bash -c \"sleep 10; ${commands[$i]}\""
     else
         docker_cmd="docker exec -it --user ${user} ${container_name} bash -c \"${commands[$i]}\""
     fi

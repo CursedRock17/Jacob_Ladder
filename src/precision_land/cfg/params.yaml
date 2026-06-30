@@ -7,3 +7,7 @@ precision_land:
     target_timeout: 5.0
     delta_position: 0.2
     delta_velocity: 0.2
+    optical_flow_height: 0.5
+    optical_flow_hold_time: 3.0
+    target_height: 1.0
+    climb_rate: 0.3

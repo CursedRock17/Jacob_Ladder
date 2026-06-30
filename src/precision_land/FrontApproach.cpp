@@ -10,7 +10,7 @@ namespace precision_land
 {
 
 FrontApproach::FrontApproach(rclcpp::Node& node)
-	: ModeBase(node, ModeBase::Settings{kFrontApproachModeName})
+	: ModeBase(node, ModeBase::Settings{kFrontApproachModeName, false})
 	, _node(node)
 {
 	setSkipMessageCompatibilityCheck();
@@ -134,6 +134,11 @@ void FrontApproach::updateSetpoint(float dt_s)
 		break;
 
 	case State::Search: {
+		RCLCPP_INFO_THROTTLE(_node.get_logger(), *_node.get_clock(), 3000,
+			"[Search] holding at [%.2f, %.2f, %.2f] — waiting for front target",
+			_vehicle_local_position->positionNed().x(),
+			_vehicle_local_position->positionNed().y(),
+			_vehicle_local_position->positionNed().z());
 		Eigen::Vector3f hold = _vehicle_local_position->positionNed();
 		_trajectory_setpoint->updatePosition(hold);
 
@@ -144,6 +149,13 @@ void FrontApproach::updateSetpoint(float dt_s)
 	}
 
 	case State::Approach: {
+		RCLCPP_INFO_THROTTLE(_node.get_logger(), *_node.get_clock(), 2000,
+			"[Approach] tag: [%.2f, %.2f, %.2f] | drone: [%.2f, %.2f, %.2f] | dist: %.2f m",
+			_front_tag.position.x(), _front_tag.position.y(), _front_tag.position.z(),
+			_vehicle_local_position->positionNed().x(),
+			_vehicle_local_position->positionNed().y(),
+			_vehicle_local_position->positionNed().z(),
+			(_front_tag.position - _vehicle_local_position->positionNed().cast<double>()).norm());
 		if (target_lost) {
 			switchToState(State::Search);
 			break;
@@ -301,12 +313,61 @@ std::string FrontApproach::stateName(State state) const
 	}
 }
 
+// ── Executor: arm -> takeoff -> schedule FrontApproach mode ──
+
+FrontApproachExecutor::FrontApproachExecutor(rclcpp::Node& node, px4_ros2::ModeBase& owned_mode)
+	: ModeExecutorBase(node, ModeExecutorBase::Settings{Settings::Activation::ActivateAlways}, owned_mode)
+	, _node(node)
+{
+	setSkipMessageCompatibilityCheck();
+	_node.declare_parameter<float>("takeoff_height", 2.5f);
+	_node.get_parameter("takeoff_height", _param_takeoff_height);
+}
+
+void FrontApproachExecutor::onActivate()
+{
+	RCLCPP_INFO(_node.get_logger(), "FrontApproach executor — arming and taking off to %.1f m", _param_takeoff_height);
+	runState(State::Arming, px4_ros2::Result::Success);
+}
+
+void FrontApproachExecutor::onDeactivate(DeactivateReason reason)
+{
+}
+
+void FrontApproachExecutor::runState(State state, px4_ros2::Result result)
+{
+	if (result != px4_ros2::Result::Success) {
+		RCLCPP_ERROR(_node.get_logger(), "State %i failed: %s", (int)state,
+			resultToString(result));
+		return;
+	}
+
+	switch (state) {
+	case State::Arming:
+		arm([this](px4_ros2::Result r) { runState(State::TakingOff, r); });
+		break;
+
+	case State::TakingOff:
+		takeoff([this](px4_ros2::Result r) { runState(State::Approaching, r); },
+			_param_takeoff_height);
+		break;
+
+	case State::Approaching:
+		RCLCPP_INFO(_node.get_logger(), "Takeoff complete — starting front approach");
+		scheduleMode(ownedMode().id(), [this](px4_ros2::Result r) {
+			RCLCPP_INFO(_node.get_logger(), "FrontApproach mode ended (%s)", resultToString(r));
+		});
+		break;
+	}
+}
+
 } // namespace precision_land
 
 int main(int argc, char* argv[])
 {
 	rclcpp::init(argc, argv);
-	rclcpp::spin(std::make_shared<px4_ros2::NodeWithMode<precision_land::FrontApproach>>(
+	rclcpp::spin(std::make_shared<px4_ros2::NodeWithModeExecutor<
+		precision_land::FrontApproachExecutor, precision_land::FrontApproach>>(
 		precision_land::kFrontApproachModeName, precision_land::kFrontApproachDebugOutput));
 	rclcpp::shutdown();
 	return 0;

@@ -1,0 +1,179 @@
+{
+  "configById": {
+    "RawMessages!6ax41v": {
+      "topicPath": "/drone_state"
+    },
+    "RawMessages!2fww3lp": {
+      "topicPath": "/fmu/out/estimator_status_flags"
+    },
+    "Image!jzg2p1": {
+      "cameraState": {
+        "distance": 20,
+        "perspective": true,
+        "phi": 60,
+        "target": [
+          0,
+          0,
+          0
+        ],
+        "targetOffset": [
+          0,
+          0,
+          0
+        ],
+        "targetOrientation": [
+          0,
+          0,
+          0,
+          1
+        ],
+        "thetaOffset": 45,
+        "fovy": 45,
+        "near": 0.5,
+        "far": 5000
+      },
+      "followMode": "follow-pose",
+      "scene": {},
+      "transforms": {},
+      "topics": {},
+      "layers": {},
+      "publish": {
+        "type": "point",
+        "poseTopic": "/move_base_simple/goal",
+        "pointTopic": "/clicked_point",
+        "poseEstimateTopic": "/initialpose",
+        "poseEstimateXDeviation": 0.5,
+        "poseEstimateYDeviation": 0.5,
+        "poseEstimateThetaDeviation": 0.26179939
+      },
+      "imageMode": {
+        "imageTopic": "/front/camera/image_raw",
+        "calibrationTopic": "/front/camera/camera_info"
+      }
+    },
+    "Image!1251x26": {
+      "cameraState": {
+        "distance": 20,
+        "perspective": true,
+        "phi": 60,
+        "target": [
+          0,
+          0,
+          0
+        ],
+        "targetOffset": [
+          0,
+          0,
+          0
+        ],
+        "targetOrientation": [
+          0,
+          0,
+          0,
+          1
+        ],
+        "thetaOffset": 45,
+        "fovy": 45,
+        "near": 0.5,
+        "far": 5000
+      },
+      "followMode": "follow-pose",
+      "scene": {},
+      "transforms": {},
+      "topics": {},
+      "layers": {},
+      "publish": {
+        "type": "point",
+        "poseTopic": "/move_base_simple/goal",
+        "pointTopic": "/clicked_point",
+        "poseEstimateTopic": "/initialpose",
+        "poseEstimateXDeviation": 0.5,
+        "poseEstimateYDeviation": 0.5,
+        "poseEstimateThetaDeviation": 0.26179939
+      },
+      "imageMode": {
+        "imageTopic": "/front/image_proc",
+        "calibrationTopic": "/front/camera/camera_info"
+      }
+    },
+    "Plot!hy6g4m": {
+      "paths": [
+        {
+          "timestampMethod": "receiveTime",
+          "value": "/fmu/out/vehicle_local_position.x",
+          "enabled": true,
+          "color": "#4e98e2",
+          "id": "0d866fde-bff7-4586-8b86-41ac1c8aab07",
+          "label": "Position X"
+        },
+        {
+          "timestampMethod": "receiveTime",
+          "value": "/fmu/out/vehicle_local_position.y",
+          "enabled": false,
+          "color": "#f5774d",
+          "id": "48244dff-336f-45ea-b33a-8dd5dfc7a687",
+          "label": "Position Y"
+        },
+        {
+          "timestampMethod": "receiveTime",
+          "value": "/fmu/out/vehicle_local_position.z",
+          "enabled": false,
+          "color": "#f7df71",
+          "id": "8f4e5138-9dbb-4848-bbd4-4237f34c9de3",
+          "label": "Position Z"
+        }
+      ]
+    },
+    "Tab!481mwfa": {
+      "activeTabIdx": 0,
+      "tabs": [
+        {
+          "title": "",
+          "layout": {
+            "first": "RawMessages!6ax41v",
+            "second": "RawMessages!2fww3lp",
+            "direction": "column"
+          }
+        }
+      ]
+    },
+    "Tab!4c7g7hy": {
+      "activeTabIdx": 0,
+      "tabs": [
+        {
+          "title": "Images",
+          "layout": {
+            "first": "Image!jzg2p1",
+            "second": "Image!1251x26",
+            "direction": "column"
+          }
+        }
+      ]
+    },
+    "Tab!1o5xvfj": {
+      "activeTabIdx": 0,
+      "tabs": [
+        {
+          "layout": "Plot!hy6g4m",
+          "title": "Great Plotter"
+        }
+      ]
+    }
+  },
+  "globalVariables": {},
+  "userNodes": {},
+  "playbackConfig": {
+    "speed": 1
+  },
+  "layout": {
+    "direction": "row",
+    "first": "Tab!481mwfa",
+    "second": {
+      "first": "Tab!4c7g7hy",
+      "second": "Tab!1o5xvfj",
+      "direction": "row",
+      "splitPercentage": 66.79258854412976
+    },
+    "splitPercentage": 14.428857715430862
+  }
+}

@@ -1,0 +1,17 @@
+[Unit]
+Description=ROS 2 PX4 Translation Node
+After=network-online.target
+
+[Service]
+Type=simple
+User=jacob
+Group=jacob
+ExecStart=/bin/bash /etc/systemd/system/run_translation_node.sh
+Restart=on-failure
+RestartSec=5s
+StandardOutput=syslog
+StandardError=syslog
+SyslogIdentifier=translation_node_service
+
+[Install]
+WantedBy=multi-user.target

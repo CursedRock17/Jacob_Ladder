@@ -5,16 +5,16 @@
 #include <Eigen/Core>
 #include <Eigen/Geometry>
 
-static const std::string kModeName = "PrecisionLandCustom";
-static const bool kEnableDebugOutput = true;
-
 using namespace px4_ros2::literals;
 
+namespace precision_land
+{
+
 PrecisionLand::PrecisionLand(rclcpp::Node& node)
-	: ModeBase(node, kModeName)
+	: ModeBase(node, Settings{kPrecisionLandModeName, false})
 	, _node(node)
 {
-	setSkipMessageCompatibilityCheck(); // added this line for message translation to run properly
+	setSkipMessageCompatibilityCheck();
 
 	_trajectory_setpoint = std::make_shared<px4_ros2::TrajectorySetpointType>(*this);
 
@@ -40,6 +40,10 @@ void PrecisionLand::loadParameters()
 	_node.declare_parameter<float>("target_timeout", 3.0);
 	_node.declare_parameter<float>("delta_position", 0.25);
 	_node.declare_parameter<float>("delta_velocity", 0.25);
+	_node.declare_parameter<float>("optical_flow_height", 0.1f);
+	_node.declare_parameter<float>("optical_flow_hold_time", 3.0f);
+	_node.declare_parameter<float>("target_height", 2.5f);
+	_node.declare_parameter<float>("climb_rate", 0.3f);
 
 	_node.get_parameter("descent_vel", _param_descent_vel);
 	_node.get_parameter("vel_p_gain", _param_vel_p_gain);
@@ -48,6 +52,10 @@ void PrecisionLand::loadParameters()
 	_node.get_parameter("target_timeout", _param_target_timeout);
 	_node.get_parameter("delta_position", _param_delta_position);
 	_node.get_parameter("delta_velocity", _param_delta_velocity);
+	_node.get_parameter("optical_flow_height", _optical_flow_height);
+	_node.get_parameter("optical_flow_hold_time", _optical_flow_hold_time);
+	_node.get_parameter("target_height", _target_height);
+	_node.get_parameter("climb_rate", _climb_rate);
 
 	RCLCPP_INFO(_node.get_logger(), "descent_vel: %f", _param_descent_vel);
 	RCLCPP_INFO(_node.get_logger(), "vel_i_gain: %f", _param_vel_i_gain);
@@ -103,9 +111,18 @@ PrecisionLand::ArucoTag PrecisionLand::getTagWorld(const ArucoTag& tag)
 
 void PrecisionLand::onActivate()
 {
-	generateSearchWaypoints();
-	_search_started = true;
-	switchToState(State::Search);
+	_base_position = _vehicle_local_position->positionNed();
+	_hold_position = _base_position;
+	_hold_position.z() = _base_position.z() - _optical_flow_height;
+	_reached_flow_height = false;
+	_state_elapsed = 0.0f;
+	_search_started = false;
+
+	switchToState(State::OpticalFlowInit);
+
+	RCLCPP_INFO(_node.get_logger(),
+		"PrecisionLand active — optical flow init at %.2f m, then climb to %.1f m",
+		_optical_flow_height, _target_height);
 }
 
 void PrecisionLand::onDeactivate()
@@ -115,25 +132,96 @@ void PrecisionLand::onDeactivate()
 
 void PrecisionLand::updateSetpoint(float dt_s)
 {
+	_state_elapsed += dt_s;
+
+	// Target tracking for states that need it
 	bool target_lost = checkTargetTimeout();
 
-	if (target_lost && !_target_lost_prev) {
-		RCLCPP_INFO(_node.get_logger(), "Target lost: State %s", stateName(_state).c_str());
-
-	} else if (!target_lost && _target_lost_prev) {
-		RCLCPP_INFO(_node.get_logger(), "Target acquired");
+	if (_state != State::OpticalFlowInit && _state != State::Climbing) {
+		if (target_lost && !_target_lost_prev) {
+			RCLCPP_INFO(_node.get_logger(), "Target lost: State %s", stateName(_state).c_str());
+		} else if (!target_lost && _target_lost_prev) {
+			RCLCPP_INFO(_node.get_logger(), "Target acquired");
+		}
+		_target_lost_prev = target_lost;
 	}
-
-	_target_lost_prev = target_lost;
 
 	// State machine
 	switch (_state) {
+
+	case State::OpticalFlowInit: {
+		const float current_z = _vehicle_local_position->positionNed().z();
+		const float altitude_gained = _base_position.z() - current_z;
+		RCLCPP_INFO_THROTTLE(_node.get_logger(), *_node.get_clock(), 2000,
+			"[OpticalFlowInit] height: %.2f m | alt gained: %.2f m | target: %.2f m | elapsed: %.1f s",
+			-current_z, altitude_gained, _optical_flow_height, _state_elapsed);
+
+		if (!_reached_flow_height
+			&& altitude_gained >= (_optical_flow_height - _param_delta_position)) {
+			_reached_flow_height = true;
+			_state_elapsed = 0.0f;
+			RCLCPP_INFO(_node.get_logger(),
+				"Reached optical flow height (%.2f m gained) — holding for %.1f s",
+				altitude_gained, _optical_flow_hold_time);
+		}
+
+		if (_reached_flow_height && _state_elapsed >= _optical_flow_hold_time) {
+			_state_elapsed = 0.0f;
+			switchToState(State::Climbing);
+		}
+
+		_trajectory_setpoint->update(
+			px4_ros2::TrajectorySetpoint{}
+				.withPosition(_hold_position)
+				.withYaw(0.0f)
+		);
+		break;
+	}
+
+	case State::Climbing: {
+		const float target_z = _base_position.z() - _target_height;
+		const float current_z = _vehicle_local_position->positionNed().z();
+		RCLCPP_INFO_THROTTLE(_node.get_logger(), *_node.get_clock(), 2000,
+			"[Climbing] height: %.2f m | alt gained: %.2f m | target: %.2f m | setpoint_z: %.2f m",
+			-current_z, _base_position.z() - current_z, _target_height, _hold_position.z());
+
+		_hold_position.z() -= _climb_rate * dt_s;
+
+		if (_hold_position.z() <= target_z) {
+			_hold_position.z() = target_z;
+		}
+
+		const float altitude_gained = _base_position.z() - current_z;
+		if (altitude_gained >= (_target_height - _param_delta_position)) {
+			RCLCPP_INFO(_node.get_logger(),
+				"Reached %.1f m (actual: %.2f m) — starting search",
+				_target_height, altitude_gained);
+			generateSearchWaypoints();
+			_search_started = true;
+			switchToState(State::Search);
+		}
+
+		_trajectory_setpoint->update(
+			px4_ros2::TrajectorySetpoint{}
+				.withPosition(_hold_position)
+				.withVelocityZ(-_climb_rate)
+				.withYaw(0.0f)
+		);
+		break;
+	}
+
 	case State::Idle: {
 		// No-op -- just spin
 		break;
 	}
 
 	case State::Search: {
+		RCLCPP_INFO_THROTTLE(_node.get_logger(), *_node.get_clock(), 3000,
+			"[Search] waypoint %d/%zu | pos: [%.2f, %.2f, %.2f]",
+			_search_waypoint_index, _search_waypoints.size(),
+			_vehicle_local_position->positionNed().x(),
+			_vehicle_local_position->positionNed().y(),
+			_vehicle_local_position->positionNed().z());
 
 		if (!std::isnan(_tag.position.x())) {
 			_approach_altitude = _vehicle_local_position->positionNed().z();
@@ -158,6 +246,12 @@ void PrecisionLand::updateSetpoint(float dt_s)
 	}
 
 	case State::Approach: {
+		RCLCPP_INFO_THROTTLE(_node.get_logger(), *_node.get_clock(), 2000,
+			"[Approach] tag: [%.2f, %.2f, %.2f] | drone: [%.2f, %.2f, %.2f]",
+			_tag.position.x(), _tag.position.y(), _tag.position.z(),
+			_vehicle_local_position->positionNed().x(),
+			_vehicle_local_position->positionNed().y(),
+			_vehicle_local_position->positionNed().z());
 
 		if (target_lost) {
 			RCLCPP_INFO(_node.get_logger(), "Failed! Target lost during %s", stateName(_state).c_str());
@@ -179,6 +273,10 @@ void PrecisionLand::updateSetpoint(float dt_s)
 	}
 
 	case State::Descend: {
+		RCLCPP_INFO_THROTTLE(_node.get_logger(), *_node.get_clock(), 2000,
+			"[Descend] height: %.2f m | vel_z: %.2f m/s | tag: [%.2f, %.2f, %.2f]",
+			-_vehicle_local_position->positionNed().z(), _param_descent_vel,
+			_tag.position.x(), _tag.position.y(), _tag.position.z());
 
 		if (target_lost) {
 			RCLCPP_INFO(_node.get_logger(), "Failed! Target lost during %s", stateName(_state).c_str());
@@ -325,6 +423,12 @@ bool PrecisionLand::positionReached(const Eigen::Vector3f& target) const
 std::string PrecisionLand::stateName(State state)
 {
 	switch (state) {
+	case State::OpticalFlowInit:
+		return "OpticalFlowInit";
+
+	case State::Climbing:
+		return "Climbing";
+
 	case State::Idle:
 		return "Idle";
 
@@ -351,10 +455,67 @@ void PrecisionLand::switchToState(State state)
 	_state = state;
 }
 
+// ── Executor: arm -> takeoff(1.25) -> schedule mode -> wait for disarm ──
+
+PrecisionLandExecutor::PrecisionLandExecutor(rclcpp::Node& node, px4_ros2::ModeBase& owned_mode)
+	: ModeExecutorBase(node, ModeExecutorBase::Settings{Settings::Activation::ActivateAlways}, owned_mode)
+	, _node(node)
+{
+	setSkipMessageCompatibilityCheck();
+}
+
+void PrecisionLandExecutor::onActivate()
+{
+	RCLCPP_INFO(_node.get_logger(), "PrecisionLand executor — arming");
+	runState(State::Arming, px4_ros2::Result::Success);
+}
+
+void PrecisionLandExecutor::onDeactivate(DeactivateReason reason)
+{
+}
+
+void PrecisionLandExecutor::runState(State state, px4_ros2::Result result)
+{
+	if (result != px4_ros2::Result::Success) {
+		RCLCPP_ERROR(_node.get_logger(), "State %i failed: %s", (int)state,
+			resultToString(result));
+		return;
+	}
+
+	switch (state) {
+	case State::Arming:
+		arm([this](px4_ros2::Result r) { runState(State::TakingOff, r); });
+		break;
+
+	case State::TakingOff:
+		RCLCPP_INFO(_node.get_logger(), "Arm complete — takeoff");
+		takeoff([this](px4_ros2::Result r) { runState(State::Approaching, r); }, 1.25f);
+		break;
+
+	case State::Approaching:
+		RCLCPP_INFO(_node.get_logger(), "Takeoff complete — starting precision land");
+		scheduleMode(ownedMode().id(), [this](px4_ros2::Result r) {
+			runState(State::Disarming, r);
+		});
+		break;
+
+	case State::Disarming:
+		RCLCPP_INFO(_node.get_logger(), "Landed — waiting for disarm");
+		waitUntilDisarmed([this](px4_ros2::Result r) {
+			RCLCPP_INFO(_node.get_logger(), "Disarmed — PrecisionLand complete");
+		});
+		break;
+	}
+}
+
+} // namespace precision_land
+
 int main(int argc, char* argv[])
 {
 	rclcpp::init(argc, argv);
-	rclcpp::spin(std::make_shared<px4_ros2::NodeWithMode<PrecisionLand>>(kModeName, kEnableDebugOutput));
+	rclcpp::spin(std::make_shared<px4_ros2::NodeWithModeExecutor<
+		precision_land::PrecisionLandExecutor, precision_land::PrecisionLand>>(
+		precision_land::kPrecisionLandModeName, precision_land::kPrecisionLandDebugOutput));
 	rclcpp::shutdown();
 	return 0;
 }

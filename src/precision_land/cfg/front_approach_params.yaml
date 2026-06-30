@@ -1,13 +1,13 @@
 front_approach:
   ros__parameters:
-    front_hold_distance: 1.0
+    front_hold_distance: 1.25
     front_delta_position: 0.25
     front_delta_velocity: 0.25
     front_target_timeout: 3.0
     front_pid_kp: 0.8
     front_pid_ki: 0.02
     front_pid_kd: 0.3
-    front_pid_max_velocity: 1.0
+    front_pid_max_velocity: 0.15
     front_pid_integral_limit: 0.5
     front_pid_kp_z: 0.6
-    front_pid_max_velocity_z: 0.6
+    front_pid_max_velocity_z: 0.10
