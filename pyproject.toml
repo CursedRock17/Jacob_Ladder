@@ -6,6 +6,9 @@ readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
     "cuvslam",
+    "depthai",
+    "numpy",
+    "scipy",
 ]
 
 [tool.uv.sources]
