@@ -11,32 +11,65 @@ PX4 expects external vision body pose in:
 import numpy as np
 
 
-# Optical/OpenCV (X right, Y down, Z forward) -> body FRD
-# (X forward, Y right, Z down).
-# Columns are optical basis vectors expressed in body FRD.
+# Camera optical (OpenCV: X right, Y down, Z forward) -> body FRD
+# (X forward, Y right, Z down). Columns are the optical basis vectors
+# expressed in body FRD, so this rotation depends only on how the camera is
+# physically bolted to the airframe.
+#
+# Forward-facing: the lens looks along body-forward.
+#   cam X (right)   -> body Y (right)
+#   cam Y (down)    -> body Z (down)
+#   cam Z (forward) -> body X (forward)
 R_BODY_FROM_CAM_OPTICAL = np.array([
     [0.0, 0.0, 1.0],
     [1.0, 0.0, 0.0],
     [0.0, 1.0, 0.0],
 ])
 
+# Down-facing: the lens looks along body-down (nadir), with the top of the
+# image toward the front of the drone (image "up" == body forward).
+#   cam X (right)   -> body Y (right)
+#   cam Y (down)    -> body -X (aft, since image-up is forward)
+#   cam Z (forward) -> body Z (down)
+R_BODY_FROM_CAM_OPTICAL_DOWN = np.array([
+    [0.0, -1.0, 0.0],
+    [1.0,  0.0, 0.0],
+    [0.0,  0.0, 1.0],
+])
 
-def r_ned_from_cuvslam_world(init_yaw_offset_rad: float) -> np.ndarray:
-    """Rotation from cuVSLAM startup world to NED.
 
-    cuVSLAM initializes its world frame to the rig frame. For an upright
-    forward-facing rig, OpenCV +Z is forward, +X is right, and +Y is down.
+def r_ned_from_body_level(init_yaw_offset_rad: float) -> np.ndarray:
+    """Rotation from a level body FRD frame to NED, for a given heading.
 
-    `init_yaw_offset_rad` is the heading of camera-forward at startup,
-    measured clockwise from true north.
+    Assumes the vehicle is upright (zero roll/pitch) at startup with its nose
+    (body +X) pointing at `init_yaw_offset_rad`, measured clockwise from true
+    north about the down axis.
     """
     c = np.cos(init_yaw_offset_rad)
     s = np.sin(init_yaw_offset_rad)
     return np.array([
-        [-s, 0.0, c],
-        [c,  0.0, s],
-        [0.0, 1.0, 0.0],
+        [c, -s, 0.0],
+        [s,  c, 0.0],
+        [0.0, 0.0, 1.0],
     ])
+
+
+def r_ned_from_cuvslam_world(
+    init_yaw_offset_rad: float, r_body_cam: np.ndarray = R_BODY_FROM_CAM_OPTICAL
+) -> np.ndarray:
+    """Rotation from the cuVSLAM startup world frame to NED.
+
+    cuVSLAM initializes its world frame to the rig (== camera optical) frame,
+    so this is the composition of the fixed camera mounting
+    (`r_body_cam`: optical -> body) with the initial vehicle attitude
+    (`r_ned_from_body_level`). Passing the mounting explicitly keeps the
+    world->NED alignment consistent with `transform_pose`'s `R_body_rig` for
+    any orientation, including a down-facing camera.
+
+    `init_yaw_offset_rad` is the vehicle-body (nose) heading at startup,
+    clockwise from true north.
+    """
+    return r_ned_from_body_level(init_yaw_offset_rad) @ r_body_cam
 
 
 def quat_to_rot(qx: float, qy: float, qz: float, qw: float) -> np.ndarray:

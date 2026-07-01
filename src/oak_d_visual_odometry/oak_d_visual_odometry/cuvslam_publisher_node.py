@@ -7,6 +7,8 @@ frames:
   /tf             tf2_msgs/TFMessage         cuvslam_world -> oak_camera
   /imu/data       sensor_msgs/Imu            raw OAK IMU passthrough
   /rgb/image      sensor_msgs/Image          optional CAM_A color frames
+  /features/image sensor_msgs/Image          left frame with tracked feature
+                                             points drawn on it (Foxglove)
 
 The rig frame follows NVIDIA's OAK-D sample: CAM_A/RGB is the rig origin and
 CAM_B/CAM_C stereo images are expressed relative to it. cuVSLAM uses OpenCV
@@ -22,6 +24,7 @@ import threading
 import time
 from typing import Any
 
+import cv2
 import depthai as dai
 import numpy as np
 
@@ -31,7 +34,9 @@ from sensor_msgs.msg import CameraInfo, Image, Imu
 from tf2_ros import TransformBroadcaster
 
 import rclpy
+from rcl_interfaces.msg import ParameterDescriptor
 from rclpy.exceptions import ParameterUninitializedException
+from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
 from rclpy.parameter import Parameter
 from rclpy.qos import DurabilityPolicy, HistoryPolicy, QoSProfile, ReliabilityPolicy
@@ -118,6 +123,14 @@ class CuVslamPublisherNode(Node):
             self.right_camera_info_publisher = self.create_publisher(
                 CameraInfo, self._right_camera_info_topic, PUBLISHER_QUEUE_SIZE)
 
+        self.features_image_publisher = None
+        self.features_camera_info_publisher = None
+        if self._publish_features:
+            self.features_image_publisher = self.create_publisher(
+                Image, self._features_image_topic, PUBLISHER_QUEUE_SIZE)
+            self.features_camera_info_publisher = self.create_publisher(
+                CameraInfo, self._features_camera_info_topic, PUBLISHER_QUEUE_SIZE)
+
         if self._publish_px4_requested and PX4_AVAILABLE:
             self.px4_publisher = self.create_publisher(
                 VehicleOdometry, self._px4_topic, PX4_QOS)
@@ -133,6 +146,11 @@ class CuVslamPublisherNode(Node):
         self._rgb_camera_info = None
         self._left_camera_info = None
         self._right_camera_info = None
+
+        # Persistent per-track colors so a feature keeps the same color across
+        # frames, mirroring the rerun visualizer.
+        self._feature_track_colors: dict[int, tuple[int, int, int]] = {}
+        self._feature_color_rng = np.random.default_rng(0)
 
         self._pending_imu: list[ImuSample] = []
         self._last_cuvslam_timestamp_ns = None
@@ -159,6 +177,8 @@ class CuVslamPublisherNode(Node):
 
         self.declare_parameter("publish_rgb", True)
         self.declare_parameter("publish_stereo_images", False)
+        self.declare_parameter("publish_features", True)
+        self.declare_parameter("feature_point_radius", 3)
         self.declare_parameter("publish_imu", True)
         self.declare_parameter("enable_imu_fusion", False)
         self.declare_parameter("imu_rate_hz", 200)
@@ -187,11 +207,20 @@ class CuVslamPublisherNode(Node):
         self.declare_parameter("right_image_topic", "/right/image")
         self.declare_parameter("left_camera_info_topic", "/left/camera_info")
         self.declare_parameter("right_camera_info_topic", "/right/camera_info")
+        self.declare_parameter("features_image_topic", "/features/image")
+        self.declare_parameter("features_camera_info_topic", "/features/camera_info")
         self.declare_parameter("px4_topic", "/fmu/in/vehicle_visual_odometry")
 
         self.declare_parameter("init_yaw_offset_deg", 0.0)
+        self.declare_parameter("camera_mounting", "forward")
         self.declare_parameter("t_body_cam", [0.0, 0.0, 0.0])
-        self.declare_parameter("R_body_cam_override", Parameter.Type.DOUBLE_ARRAY)
+        # Optional 3x3 (row-major, 9 values) camera-optical -> body FRD override.
+        # Declared with dynamic typing and an empty default so it is always
+        # initialized: a bare DOUBLE_ARRAY with a YAML "[]" cannot infer its
+        # type and would stay uninitialized, which breaks the get_parameters
+        # service used by Foxglove/rqt.
+        self.declare_parameter(
+            "R_body_cam_override", [], ParameterDescriptor(dynamic_typing=True))
         self.declare_parameter("position_variance", [0.01, 0.01, 0.02])
         self.declare_parameter("orientation_variance", [0.01, 0.01, 0.02])
         self.declare_parameter("velocity_variance", [0.1, 0.1, 0.1])
@@ -219,6 +248,8 @@ class CuVslamPublisherNode(Node):
 
         self._publish_rgb = bool(self.get_parameter("publish_rgb").value)
         self._publish_stereo_images = bool(self.get_parameter("publish_stereo_images").value)
+        self._publish_features = bool(self.get_parameter("publish_features").value)
+        self._feature_point_radius = max(1, int(self.get_parameter("feature_point_radius").value))
         self._publish_imu = bool(self.get_parameter("publish_imu").value)
         self._enable_imu_fusion = bool(self.get_parameter("enable_imu_fusion").value)
         self._imu_rate_hz = int(self.get_parameter("imu_rate_hz").value)
@@ -253,20 +284,30 @@ class CuVslamPublisherNode(Node):
             self.get_parameter("left_camera_info_topic").value)
         self._right_camera_info_topic = str(
             self.get_parameter("right_camera_info_topic").value)
+        self._features_image_topic = str(
+            self.get_parameter("features_image_topic").value)
+        self._features_camera_info_topic = str(
+            self.get_parameter("features_camera_info_topic").value)
         self._px4_topic = str(self.get_parameter("px4_topic").value)
 
-        yaw_deg = float(self.get_parameter("init_yaw_offset_deg").value)
-        self._R_ned_world = frames.r_ned_from_cuvslam_world(math.radians(yaw_deg))
-
         self._t_body_cam = np.array(self._list_param("t_body_cam", 3, float), dtype=np.float64)
+
+        # The camera mounting (optical -> body FRD) must be resolved before the
+        # world->NED rotation, because cuVSLAM's world frame starts aligned with
+        # the camera and the two rotations have to describe the same mounting.
         try:
-            override = list(self.get_parameter("R_body_cam_override").value)
+            override_value = self.get_parameter("R_body_cam_override").value
+            override = list(override_value) if override_value else []
         except ParameterUninitializedException:
             override = []
         if len(override) == 9:
             self._R_body_cam = np.array(override, dtype=np.float64).reshape(3, 3)
         else:
-            self._R_body_cam = frames.R_BODY_FROM_CAM_OPTICAL.copy()
+            self._R_body_cam = self._preset_r_body_cam()
+
+        yaw_deg = float(self.get_parameter("init_yaw_offset_deg").value)
+        self._R_ned_world = frames.r_ned_from_cuvslam_world(
+            math.radians(yaw_deg), self._R_body_cam)
 
         self._pos_var = np.array(
             self._list_param("position_variance", 3, float), dtype=np.float32)
@@ -282,6 +323,26 @@ class CuVslamPublisherNode(Node):
                 f"{name} must have {expected_len} elements; using zeros")
             return [item_type(0.0)] * expected_len
         return [item_type(v) for v in value]
+
+    def _preset_r_body_cam(self) -> np.ndarray:
+        """Camera-optical -> body FRD rotation from the `camera_mounting` preset.
+
+        Overridden by `R_body_cam_override` when a 9-element matrix is given.
+        """
+        mounting = str(self.get_parameter("camera_mounting").value).strip().lower()
+        presets = {
+            "forward": frames.R_BODY_FROM_CAM_OPTICAL,
+            "down": frames.R_BODY_FROM_CAM_OPTICAL_DOWN,
+        }
+        preset = presets.get(mounting)
+        if preset is None:
+            self.get_logger().warn(
+                f"Unknown camera_mounting '{mounting}'; expected one of "
+                f"{sorted(presets)}. Falling back to 'forward'.")
+            preset = frames.R_BODY_FROM_CAM_OPTICAL
+        else:
+            self.get_logger().info(f"Using '{mounting}' camera mounting")
+        return preset.copy()
 
     # ---------- DepthAI + cuVSLAM pipeline ----------
 
@@ -411,11 +472,13 @@ class CuVslamPublisherNode(Node):
             if self._enable_imu_fusion
             else vslam.Tracker.OdometryMode.Multicamera
         )
+        # Feature-point visualization needs the tracker to export observations.
+        export_observations = self._enable_observations_export or self._publish_features
         odom_config = vslam.Tracker.OdometryConfig(
             async_sba=self._async_sba,
             odometry_mode=odometry_mode,
             enable_final_landmarks_export=self._enable_final_landmarks_export,
-            enable_observations_export=self._enable_observations_export,
+            enable_observations_export=export_observations,
             rectified_stereo_camera=self._rectified_stereo_camera,
             use_gpu=self._use_gpu,
         )
@@ -554,6 +617,7 @@ class CuVslamPublisherNode(Node):
 
         self._last_cuvslam_timestamp_ns = timestamp_ns
         self._publish_stereo_debug_images(left_frame, right_frame)
+        self._publish_feature_image(tracker, left_frame)
 
         if pose_estimate is None:
             return
@@ -729,6 +793,56 @@ class CuVslamPublisherNode(Node):
         msg.quality = 100
         self.px4_publisher.publish(msg)
 
+    def _feature_color(self, track_id: int) -> tuple[int, int, int]:
+        """Return a stable BGR color for a feature track id."""
+        color = self._feature_track_colors.get(track_id)
+        if color is None:
+            rgb = self._feature_color_rng.integers(64, 256, size=3)
+            # OpenCV/cv_bridge bgr8 expects BGR ordering.
+            color = (int(rgb[2]), int(rgb[1]), int(rgb[0]))
+            self._feature_track_colors[track_id] = color
+        return color
+
+    def _publish_feature_image(self, tracker, left_frame):
+        """Draw the left camera's tracked features and publish for Foxglove.
+
+        Mirrors the rerun example's 2D observation overlay: each tracked
+        feature is drawn as a circle whose color is stable across frames so a
+        single Foxglove Image panel on ``features_image_topic`` shows the
+        features being tracked.
+        """
+        if self.features_image_publisher is None:
+            return
+
+        # Always publish the frame (even with zero features or a read error) so
+        # the topic keeps streaming and stays discoverable in Foxglove, and so
+        # the live downward view is available for debugging tracking dropouts.
+        try:
+            observations = tracker.get_last_observations(0)
+        except Exception as exc:
+            observations = []
+            self.get_logger().warn(
+                f"Could not read cuVSLAM observations: {exc}",
+                throttle_duration_sec=5.0)
+
+        overlay = cv2.cvtColor(left_frame.getCvFrame(), cv2.COLOR_GRAY2BGR)
+        for obs in observations:
+            center = (int(round(obs.u)), int(round(obs.v)))
+            cv2.circle(
+                overlay, center, self._feature_point_radius,
+                self._feature_color(obs.id), thickness=-1, lineType=cv2.LINE_AA)
+
+        stamp = self._now()
+        msg = self.bridge.cv2_to_imgmsg(overlay, encoding="bgr8")
+        msg.header.stamp = stamp
+        msg.header.frame_id = self._left_frame_id
+        self.features_image_publisher.publish(msg)
+
+        if (self._left_camera_info is not None
+                and self.features_camera_info_publisher is not None):
+            self._left_camera_info.header = msg.header
+            self.features_camera_info_publisher.publish(self._left_camera_info)
+
     def _publish_stereo_debug_images(self, left_frame, right_frame):
         if not self._publish_stereo_images:
             return
@@ -785,9 +899,16 @@ class CuVslamPublisherNode(Node):
         return self.get_clock().now().to_msg()
 
     def destroy_node(self):
+        # Ask the DepthAI worker to stop and give it time to tear the pipeline
+        # and device down cleanly. It is a daemon thread, so if we returned
+        # while it was still mid-call the interpreter would kill it during a
+        # native DepthAI call and the C++ runtime would abort().
         self._stop.set()
         if self._worker.is_alive():
-            self._worker.join(timeout=2.0)
+            self._worker.join(timeout=10.0)
+            if self._worker.is_alive():
+                self.get_logger().warn(
+                    "DepthAI worker did not stop within 10s; shutting down anyway")
         super().destroy_node()
 
 
@@ -797,12 +918,16 @@ def main(args=None, publish_px4: bool = False):
     try:
         node = CuVslamPublisherNode(publish_px4=publish_px4)
         rclpy.spin(node)
-    except KeyboardInterrupt:
+    except (KeyboardInterrupt, ExternalShutdownException):
+        # Ctrl-C: launch's signal handler may have already shut the context
+        # down. Fall through to clean up the node and shut down idempotently.
         pass
     finally:
         if node is not None:
             node.destroy_node()
-        rclpy.shutdown()
+        # try_shutdown() is a no-op if the context is already shut down, so it
+        # never raises "rcl_shutdown already called" the way shutdown() does.
+        rclpy.try_shutdown()
 
 
 if __name__ == "__main__":
