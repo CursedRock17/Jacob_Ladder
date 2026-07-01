@@ -3,13 +3,16 @@
 <package format="3">
   <name>oak_d_visual_odometry</name>
   <version>0.0.1</version>
-  <description>OAK-D Lite stereo-VIO bridge to PX4 vehicle_visual_odometry using SpectacularAI SDK.</description>
+  <description>OAK-D stereo visual odometry bridge to ROS 2 and PX4 using NVIDIA cuVSLAM.</description>
   <maintainer email="mtglucas1@gmail.com">Lucas Wendland</maintainer>
   <license>TODO</license>
 
   <depend>rclpy</depend>
   <depend>std_msgs</depend>
   <depend>geometry_msgs</depend>
+  <depend>sensor_msgs</depend>
+  <depend>cv_bridge</depend>
+  <depend>tf2_ros</depend>
   <depend>px4_msgs</depend>
 
   <test_depend>ament_copyright</test_depend>

@@ -5,7 +5,13 @@ from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy, DurabilityPo
 from rclpy.qos import qos_profile_sensor_data
 
 # ROS 2 msgs
-from px4_msgs.msg import OffboardControlMode, TrajectorySetpoint, VehicleCommand, VehicleLocalPosition, VehicleStatus
+from px4_msgs.msg import (
+    OffboardControlMode,
+    TrajectorySetpoint,
+    VehicleCommand,
+    VehicleLocalPosition,
+    VehicleStatus,
+)
 from geometry_msgs.msg import PoseStamped
 from nav_msgs.msg import Path
 
@@ -18,59 +24,79 @@ class DroneSmoothPlannerNode(Node):
     """Node for controlling a vehicle in offboard mode."""
 
     def __init__(self) -> None:
-        super().__init__('drone_smooth_planner_node')
+        super().__init__("drone_smooth_planner_node")
         self.get_logger().info("Offboard Ship land Node Alive!")
 
         # Useful Naming Parameters
-        self.namespace = self.declare_parameter('namespace', "").value
+        self.namespace = self.declare_parameter("namespace", "").value
 
         # Trajectory Parameters - Using parameters means we can adjust in CLI
-        self.num_waypoints = self.declare_parameter('num_waypoints', 10).value
-        self.setpoint_rate_hz = self.declare_parameter('setpoint_rate_hz', 20).value  # Hertz
-        self.s_curve_steepness = self.declare_parameter('s_curve_steepness', 4.0).value
-        self.waypoint_tolerance_m = self.declare_parameter('waypoint_tolerance_m', 0.15).value  # Meters
-        self.max_velocity = self.declare_parameter('max_velocity', 0.5).value  # Meters/sec
-        self.max_acceleration = self.declare_parameter('max_acceleration', 0.35).value  # Meters/sec^2
+        self.num_waypoints = self.declare_parameter("num_waypoints", 10).value
+        self.setpoint_rate_hz = self.declare_parameter(
+            "setpoint_rate_hz", 20
+        ).value  # Hertz
+        self.s_curve_steepness = self.declare_parameter("s_curve_steepness", 4.0).value
+        self.waypoint_tolerance_m = self.declare_parameter(
+            "waypoint_tolerance_m", 0.15
+        ).value  # Meters
+        self.max_velocity = self.declare_parameter(
+            "max_velocity", 0.5
+        ).value  # Meters/sec
+        self.max_acceleration = self.declare_parameter(
+            "max_acceleration", 0.35
+        ).value  # Meters/sec^2
 
         # Configure QoS profile for publishing and subscribing
         qos_profile = QoSProfile(
             reliability=ReliabilityPolicy.BEST_EFFORT,
             durability=DurabilityPolicy.TRANSIENT_LOCAL,
             history=HistoryPolicy.KEEP_LAST,
-            depth=1
+            depth=1,
         )
 
         # Create Input Publishers
         self.offboard_control_mode_publisher = self.create_publisher(
-            OffboardControlMode, '/fmu/in/offboard_control_mode', qos_profile)
+            OffboardControlMode, "/fmu/in/offboard_control_mode", qos_profile
+        )
         self.trajectory_setpoint_publisher = self.create_publisher(
-            TrajectorySetpoint, '/fmu/in/trajectory_setpoint', qos_profile)
+            TrajectorySetpoint, "/fmu/in/trajectory_setpoint", qos_profile
+        )
         self.vehicle_command_publisher = self.create_publisher(
-            VehicleCommand, '/fmu/in/vehicle_command', qos_profile)
+            VehicleCommand, "/fmu/in/vehicle_command", qos_profile
+        )
 
         # Create Output Publishers
         self.vehicle_status_subscriber = self.create_subscription(
-            VehicleStatus, '/fmu/out/vehicle_status', self.vehicle_status_callback, qos_profile)
+            VehicleStatus,
+            "/fmu/out/vehicle_status",
+            self.vehicle_status_callback,
+            qos_profile,
+        )
         self.vehicle_local_position_subscriber = self.create_subscription(
-            VehicleLocalPosition, '/fmu/out/vehicle_local_position',
-            self.vehicle_local_position_callback, qos_profile_sensor_data)
+            VehicleLocalPosition,
+            "/fmu/out/vehicle_local_position",
+            self.vehicle_local_position_callback,
+            qos_profile_sensor_data,
+        )
 
         # Input from onboard sensors - i.e Camera, Optical Flow
         self.drogue_pose_subscriber = self.create_subscription(
             PoseStamped,
-            self.namespace + '/tag_detections',
+            self.namespace + "/tag_detections",
             self.drogue_pose_callback,
-            qos_profile_sensor_data
+            qos_profile_sensor_data,
         )
 
         # Visualization Publishers
         self.path_viz_pub = self.create_publisher(
-            Path, self.namespace + '/trajectory_path_viz', qos_profile)
+            Path, self.namespace + "/trajectory_path_viz", qos_profile
+        )
         self.current_pose_viz_pub = self.create_publisher(
-            Path, self.namespace + '/current_pose_viz', qos_profile)
+            Path, self.namespace + "/current_pose_viz", qos_profile
+        )
 
         # self.vehicle_local_position_subscriber = self.create_subscription(
-            # PoseStamped, '/qvio', self.vehicle_local_position_callback, qos_profile_sensor_data)
+        # PoseStamped, '/qvio', self.vehicle_local_position_callback, qos_profile_sensor_data)
 
         # S-Curve Planner Information
         self.waypoints = []
@@ -109,7 +135,9 @@ class DroneSmoothPlannerNode(Node):
         if self.land_start_time and self.land_start_time + 5.0 < time.time():
             print("Quitting program")
             self.timer.cancel()
-            self.get_clock().call_later(0.1, self._shutdown)
+            # rclpy's Clock has no call_later; schedule a short one-shot-style
+            # timer instead (_shutdown stops the node so it only fires once).
+            self.create_timer(0.1, self._shutdown)
 
         if self.offboard_setpoint_counter == 10:
             self.engage_offboard_mode()
@@ -119,12 +147,14 @@ class DroneSmoothPlannerNode(Node):
         if self.offboard_setpoint_counter < 11:
             self.offboard_setpoint_counter += 1
 
-        if (self.start_time + 15 > time.time() and self.start_time + 10 < time.time()):
+        if self.start_time + 15 > time.time() and self.start_time + 10 < time.time():
             self.publish_takeoff_setpoint(0.0, 0.0, self.altitude)
         elif self.start_time + 15 < time.time():
             if not self.hit_path:
                 print("Doing drogue alignment now")
-                self.drogue_align_timer = self.create_timer(1 / self.setpoint_rate_hz, self.offboard_move_callback)
+                self.drogue_align_timer = self.create_timer(
+                    1 / self.setpoint_rate_hz, self.offboard_move_callback
+                )
                 self.hit_path = True
 
     # ------------ Essential Drone Functions --------------- #
@@ -135,19 +165,22 @@ class DroneSmoothPlannerNode(Node):
     def arm(self):
         """Send an arm command to the vehicle."""
         self.publish_vehicle_command(
-            VehicleCommand.VEHICLE_CMD_COMPONENT_ARM_DISARM, param1=1.0)
-        self.get_logger().info('Arm command sent')
+            VehicleCommand.VEHICLE_CMD_COMPONENT_ARM_DISARM, param1=1.0
+        )
+        self.get_logger().info("Arm command sent")
 
     def disarm(self):
         """Send a disarm command to the vehicle."""
         self.publish_vehicle_command(
-            VehicleCommand.VEHICLE_CMD_COMPONENT_ARM_DISARM, param1=0.0)
-        self.get_logger().info('Disarm command sent')
+            VehicleCommand.VEHICLE_CMD_COMPONENT_ARM_DISARM, param1=0.0
+        )
+        self.get_logger().info("Disarm command sent")
 
     def engage_offboard_mode(self):
         """Switch to offboard mode."""
         self.publish_vehicle_command(
-            VehicleCommand.VEHICLE_CMD_DO_SET_MODE, param1=1.0, param2=6.0)
+            VehicleCommand.VEHICLE_CMD_DO_SET_MODE, param1=1.0, param2=6.0
+        )
         self.get_logger().info("Switching to offboard mode")
 
     def land(self):
@@ -279,7 +312,7 @@ class DroneSmoothPlannerNode(Node):
         dx = end_pos[0] - start_pos[0]
         dy = end_pos[1] - start_pos[1]
         dz = end_pos[2] - start_pos[2]
-        true_distance = math.sqrt(dx*dx + dy*dy + dz*dz)
+        true_distance = math.sqrt(dx * dx + dy * dy + dz * dz)
         return true_distance
 
     def compute_direction(self, start_pos, end_pos):
@@ -295,11 +328,11 @@ class DroneSmoothPlannerNode(Node):
         dy = end_pos[1] - start_pos[1]
         dz = end_pos[2] - start_pos[2]
 
-        magnitude = math.sqrt(dx*dx + dy*dy + dz*dz)
+        magnitude = math.sqrt(dx * dx + dy * dy + dz * dz)
         if magnitude < 1e-6:
             return (0.0, 0.0, 0.0)
 
-        return (dx/magnitude, dy/magnitude, dz/magnitude)
+        return (dx / magnitude, dy / magnitude, dz / magnitude)
 
     def generate_s_curve_velocity_profile(self, total_distance, num_samples, dt):
         """
@@ -323,7 +356,7 @@ class DroneSmoothPlannerNode(Node):
         # Get the total time
         T = (num_samples - 1) * dt
 
-        # For essentially each number of waypoints calculate the various velocity, acceleration, 
+        # For essentially each number of waypoints calculate the various velocity, acceleration,
         # and jerk profiles which are just derivatives of the previous.
         for i in range(num_samples):
             ti = i * dt
@@ -336,7 +369,11 @@ class DroneSmoothPlannerNode(Node):
             # Derivatives
             v = (10.0 / T) * s * (1.0 - s) if T > 0 else 0
             a = (100.0 / (T * T)) * s * (1.0 - s) * (1.0 - 2.0 * s) if T > 0 else 0
-            j = (1000.0 / (T * T * T)) * s * (1.0 - s) * (1.0 - 6.0 * s * (1.0 - s)) if T > 0 else 0
+            j = (
+                (1000.0 / (T * T * T)) * s * (1.0 - s) * (1.0 - 6.0 * s * (1.0 - s))
+                if T > 0
+                else 0
+            )
 
             v_profile.append(v)
             a_profile.append(a)
@@ -345,7 +382,7 @@ class DroneSmoothPlannerNode(Node):
         # Scale to actual distance using trapezoidal integration
         current_distance = 0.0
         for i in range(len(v_profile) - 1):
-            current_distance += (v_profile[i] + v_profile[i+1]) / 2.0 * dt
+            current_distance += (v_profile[i] + v_profile[i + 1]) / 2.0 * dt
 
         if current_distance > 0:
             scale = total_distance / current_distance
@@ -355,7 +392,10 @@ class DroneSmoothPlannerNode(Node):
 
         # Clamp to limits
         v_profile = [min(max(v, 0), self.max_velocity) for v in v_profile]
-        a_profile = [min(max(a, -self.max_acceleration), self.max_acceleration) for a in a_profile]
+        a_profile = [
+            min(max(a, -self.max_acceleration), self.max_acceleration)
+            for a in a_profile
+        ]
 
         return v_profile, a_profile, j_profile
 
@@ -378,24 +418,27 @@ class DroneSmoothPlannerNode(Node):
 
         # Drogue position (relative, need to convert to world frame)
         end_pos = (
-               start_pos[0] + self.drogue_pose[0],
-               start_pos[1] + self.drogue_pose[1],
-               start_pos[2] + self.drogue_pose[2]
-           )
+            start_pos[0] + self.drogue_pose[0],
+            start_pos[1] + self.drogue_pose[1],
+            start_pos[2] + self.drogue_pose[2],
+        )
 
         # Generate waypoints
-        waypoints = self.generate_s_curve_waypoints(start_pos, end_pos, self.num_waypoints)
+        waypoints = self.generate_s_curve_waypoints(
+            start_pos, end_pos, self.num_waypoints
+        )
 
         # Compute total distance
         total_distance = 0.0
         for i in range(len(waypoints) - 1):
-            total_distance += self.compute_distance(waypoints[i], waypoints[i+1])
+            total_distance += self.compute_distance(waypoints[i], waypoints[i + 1])
 
         # Generate velocity profile
         dt = 1.0 / self.setpoint_rate_hz
         num_samples = len(waypoints)
         v_profile, a_profile, j_profile = self.generate_s_curve_velocity_profile(
-            total_distance, num_samples, dt)
+            total_distance, num_samples, dt
+        )
 
         # Build path array of TrajectorySetpoint messages
         self.path = []
@@ -407,28 +450,28 @@ class DroneSmoothPlannerNode(Node):
 
             # Velocity (along path direction)
             if i < len(waypoints) - 1:
-                direction = self.compute_direction(waypoints[i], waypoints[i+1])
+                direction = self.compute_direction(waypoints[i], waypoints[i + 1])
             else:
-                direction = self.compute_direction(waypoints[i-1], waypoints[i])
+                direction = self.compute_direction(waypoints[i - 1], waypoints[i])
 
             msg.velocity = [
                 v_profile[i] * direction[0],
                 v_profile[i] * direction[1],
-                v_profile[i] * direction[2]
+                v_profile[i] * direction[2],
             ]
 
             # Acceleration
             msg.acceleration = [
                 a_profile[i] * direction[0],
                 a_profile[i] * direction[1],
-                a_profile[i] * direction[2]
+                a_profile[i] * direction[2],
             ]
 
             # Jerk
             msg.jerk = [
                 j_profile[i] * direction[0],
                 j_profile[i] * direction[1],
-                j_profile[i] * direction[2]
+                j_profile[i] * direction[2],
             ]
 
             # Yaw toward drogue
@@ -454,8 +497,10 @@ class DroneSmoothPlannerNode(Node):
         self.offboard_arr_counter = 0
         self.trajectory_active = True
 
-        print(f"Generated S-curve trajectory: {len(self.path)} points, "
-              f"distance: {total_distance:.2f}m")
+        print(
+            f"Generated S-curve trajectory: {len(self.path)} points, "
+            f"distance: {total_distance:.2f}m"
+        )
 
         # Create Visualization MSG of a Path
         self.publish_path_visualization()
@@ -470,13 +515,17 @@ class DroneSmoothPlannerNode(Node):
             None
         """
         # Generate trajectory on first call
-        if not hasattr(self, 'path') or len(self.path) == 0:
+        if not hasattr(self, "path") or len(self.path) == 0:
             self.generate_trajectory_to_drogue()
-            if not hasattr(self, 'path') or len(self.path) == 0:
+            if not hasattr(self, "path") or len(self.path) == 0:
                 return
 
         # Check if we should regenerate (drogue moved significantly)
-        if self.drogue_pose and self.vehicle_local_position and self.offboard_arr_counter > 0:
+        if (
+            self.drogue_pose
+            and self.vehicle_local_position
+            and self.offboard_arr_counter > 0
+        ):
             start_pos = self.vehicle_local_position
             drogue_relative = self.drogue_pose
             current_target = start_pos + drogue_relative
@@ -485,7 +534,7 @@ class DroneSmoothPlannerNode(Node):
             current_target = (
                 start_pos[0] + drogue_relative[0],
                 start_pos[1] + drogue_relative[1],
-                start_pos[2] + drogue_relative[2]
+                start_pos[2] + drogue_relative[2],
             )
 
             # If drogue moved > 0.10m, regenerate
@@ -509,16 +558,19 @@ class DroneSmoothPlannerNode(Node):
                 distance = self.compute_distance(self.vehicle_local_position, target)
 
                 # If we've made it to the next waypoint to a level of tolerance, move on.
-                if distance < self.waypoint_tolerance_m or self.offboard_arr_counter == 0:
+                if (
+                    distance < self.waypoint_tolerance_m
+                    or self.offboard_arr_counter == 0
+                ):
                     self.offboard_arr_counter += 1
 
         else:
             # Reached end - check if close enough to drogue
             if self.vehicle_local_position and self.drogue_pose:
                 drogue_distance = math.sqrt(
-                    self.drogue_pose[0]**2 +
-                    self.drogue_pose[1]**2 +
-                    self.drogue_pose[2]**2
+                    self.drogue_pose[0] ** 2
+                    + self.drogue_pose[1] ** 2
+                    + self.drogue_pose[2] ** 2
                 )
 
                 if drogue_distance < self.waypoint_tolerance_m:  # Within our tolerance
@@ -532,8 +584,10 @@ class DroneSmoothPlannerNode(Node):
                             print("Actually landing now")
                             self.drogue_align_timer.cancel()
                         else:
-                            print(f"Hover cords: {self.hover_cords}")
-                            self.publish_current_hover_setpoint(self.hover_cords[0], self.hover_cords[1])
+                            hover = self.hover_cords
+                            print(f"Hover cords: {hover}")
+                            if hover is not None:
+                                self.publish_current_hover_setpoint(hover[0], hover[1])
                 else:
                     # Not close enough, regenerate trajectory
                     self.generate_trajectory_to_drogue()
@@ -548,7 +602,7 @@ class DroneSmoothPlannerNode(Node):
         :returns:
             None
         """
-        if not hasattr(self, 'path') or len(self.path) == 0:
+        if not hasattr(self, "path") or len(self.path) == 0:
             return
 
         # Create a Path msg
@@ -604,9 +658,8 @@ def main(args=None) -> None:
     rclpy.shutdown()
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     try:
         main()
     except Exception as e:
         print(e)
-

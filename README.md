@@ -10,6 +10,36 @@ The framework uses PX4 **external modes** instead of the traditional offboard AP
 Within the project you'll find several pacakges, this README serves as a higher level overview of all the components involved in the project.
 For a deeper view, there are embedded markdown files which break down specific rationale, processes, and objectives.
 
+## Python Environment
+
+Use the repo uv environment for Python dependencies. It is created with system
+site packages enabled so ROS 2, `cv_bridge`, JetPack OpenCV, and other system
+Python modules remain visible inside the venv.
+
+```bash
+uv venv --python 3.10 --system-site-packages .venv
+uv sync
+source .venv/bin/activate
+source /opt/ros/humble/setup.bash
+source install/setup.bash  # after colcon build
+```
+
+That's it — `uv sync` installs everything, including the YOLO/drogue
+image-processing stack (`torch`, `torchvision`, `ultralytics`, `opencv-python`).
+There is no extra to enable and no bootstrap script to run.
+
+On JetPack 6.2 / CUDA 12.6 (aarch64), `uv sync` pulls the pinned CUDA-enabled
+`torch` and `torchvision` wheels from
+[pypi.jetson-ai-lab.io/jp6/cu126](https://pypi.jetson-ai-lab.io/jp6/cu126)
+plus the `jetson-cudss-bootstrap` workspace package (see
+`packages/jetson_cudss_bootstrap`), which preloads the cuDSS runtime shared
+libraries torch needs at import time. No `LD_LIBRARY_PATH` exports or extra
+install steps are required — `uv sync` (or `uv run ...`) is enough.
+
+The only reason to pass `--system-site-packages` when creating the venv is so
+ROS 2, `cv_bridge`, and JetPack OpenCV stay visible inside it. If you re-create
+the venv, keep that flag.
+
 START HERE:
 
 | Package | Objective |
@@ -19,7 +49,7 @@ START HERE:
 | [drogue_flight](src/drogue_flight) | TODO: In-Progress Porting for flying to a detected KC-130 drogue |
 | [jacob_manual](src/jacob_manual)  | ROS 2 External Modes that Require Manual Control to get in the air, but fly autonomous missions after |
 | [precision_land](src/precision_land)  | ROS 2 External Modes that fly autonomous missions for object detection, trajectory planning, and landing
-| [oak_d_visual_odometry](src/oak_d_visual_odometry)  | ROS 2 nodes for any Luxonis camera that uses DepthAI API, meant for stereo/depth cameras **with** an IMU which provides visual odometry (VIO) data for flight.
+| [oak_d_visual_odometry](src/oak_d_visual_odometry)  | ROS 2 nodes for OAK-D visual odometry using NVIDIA cuVSLAM, with optional PX4 `VehicleOdometry` output for flight. |
 | [px4-ros2-interface-lib](src/px4-ros2-interface-lib) | Should NOT be Altered : Use Given Branch -> ROS 2 <-> PX4 Bridge, allows us to create External Modes |
 | [px4_msgs](src/px4_msgs) | Should NOT be Altered : Use Given Branch -> PX4 Messages for ROS 2 Communication |
 | [px4_msgs_old](src/px4_msgs_old) | Should NOT be Altered : Use Given Branch -> More PX4 Messages for ROS 2 Communication |

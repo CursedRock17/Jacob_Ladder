@@ -1,11 +1,15 @@
 import rclpy
-import math
 import time
 from rclpy.node import Node
 from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy, DurabilityPolicy
 from rclpy.qos import qos_profile_sensor_data
-from px4_msgs.msg import OffboardControlMode, TrajectorySetpoint, VehicleCommand, VehicleLocalPosition, VehicleStatus
-import os, pty, select, re, sys
+from px4_msgs.msg import (
+    OffboardControlMode,
+    TrajectorySetpoint,
+    VehicleCommand,
+    VehicleLocalPosition,
+    VehicleStatus,
+)
 from geometry_msgs.msg import PoseStamped
 
 
@@ -13,7 +17,7 @@ class OffboardShipLandNode(Node):
     """Node for controlling a vehicle in offboard mode."""
 
     def __init__(self) -> None:
-        super().__init__('offboard_ship_land_node')
+        super().__init__("offboard_ship_land_node")
 
         self.get_logger().info("Offboard Ship land Node Alive!")
 
@@ -22,34 +26,42 @@ class OffboardShipLandNode(Node):
             reliability=ReliabilityPolicy.BEST_EFFORT,
             durability=DurabilityPolicy.TRANSIENT_LOCAL,
             history=HistoryPolicy.KEEP_LAST,
-            depth=1
+            depth=1,
         )
 
         # Create publishers
         self.offboard_control_mode_publisher = self.create_publisher(
-            OffboardControlMode, '/fmu/in/offboard_control_mode', qos_profile)
+            OffboardControlMode, "/fmu/in/offboard_control_mode", qos_profile
+        )
         self.trajectory_setpoint_publisher = self.create_publisher(
-            TrajectorySetpoint, '/fmu/in/trajectory_setpoint', qos_profile)
+            TrajectorySetpoint, "/fmu/in/trajectory_setpoint", qos_profile
+        )
         self.vehicle_command_publisher = self.create_publisher(
-            VehicleCommand, '/fmu/in/vehicle_command', qos_profile)
+            VehicleCommand, "/fmu/in/vehicle_command", qos_profile
+        )
         self.vehicle_status_subscriber = self.create_subscription(
-            VehicleStatus, '/fmu/out/vehicle_status', self.vehicle_status_callback, qos_profile)
+            VehicleStatus,
+            "/fmu/out/vehicle_status",
+            self.vehicle_status_callback,
+            qos_profile,
+        )
 
         self.tag_subscriber = self.create_subscription(
             PoseStamped,
-            '/tag_detections',        
+            "/tag_detections",
             self.tag_pose_callback,
-            qos_profile_sensor_data
+            qos_profile_sensor_data,
         )
 
         # self.vehicle_local_position_subscriber = self.create_subscription(
-            # PoseStamped, '/qvio', self.vehicle_local_position_callback, qos_profile_sensor_data)
-
+        # PoseStamped, '/qvio', self.vehicle_local_position_callback, qos_profile_sensor_data)
 
         self.vehicle_local_position_subscriber = self.create_subscription(
-            VehicleLocalPosition, '/fmu/out/vehicle_local_position',
-            self.vehicle_local_position_callback, qos_profile_sensor_data)
-
+            VehicleLocalPosition,
+            "/fmu/out/vehicle_local_position",
+            self.vehicle_local_position_callback,
+            qos_profile_sensor_data,
+        )
 
         self.rate = 20
         self.duration = 5
@@ -70,7 +82,6 @@ class OffboardShipLandNode(Node):
         self.offboard_arr_counter = 0
         self.tag_pose = None
 
-
         self.timer = self.create_timer(0.1, self.timer_callback)
 
     def _shutdown(self):
@@ -85,22 +96,26 @@ class OffboardShipLandNode(Node):
         if self.land_start_time and self.land_start_time + 5.0 < time.time():
             print("Quitting program")
             self.timer.cancel()
-            self.get_clock().call_later(0.1, self._shutdown)
+            # rclpy's Clock has no call_later; schedule a short one-shot-style
+            # timer instead (_shutdown stops the node so it only fires once).
+            self.create_timer(0.1, self._shutdown)
 
         if self.offboard_setpoint_counter == 10:
-           self.engage_offboard_mode()
-           self.arm()
-           self.armed = True
+            self.engage_offboard_mode()
+            self.arm()
+            self.armed = True
 
         if self.offboard_setpoint_counter < 11:
             self.offboard_setpoint_counter += 1
 
-        if (self.start_time + 15 > time.time() and self.start_time + 10 < time.time()):
+        if self.start_time + 15 > time.time() and self.start_time + 10 < time.time():
             self.publish_takeoff_setpoint(0.0, 0.0, self.altitude)
         elif self.start_time + 15 < time.time():
-            if(not self.hit_path):
-                print("Doing tag alignment now")             
-                self.tag_align_timer = self.create_timer(1 / self.rate, self.offboard_move_callback)
+            if not self.hit_path:
+                print("Doing tag alignment now")
+                self.tag_align_timer = self.create_timer(
+                    1 / self.rate, self.offboard_move_callback
+                )
                 self.hit_path = True
 
     def tag_pose_callback(self, msg):
@@ -121,7 +136,7 @@ class OffboardShipLandNode(Node):
         # PX4 NED: x=North, y=East, z=Down
         self.vehicle_local_position = (msg.x, msg.y, msg.z)
         # print(f"Vehicle Local Position: x={msg.x:.2f} m, y={msg.y:.2f} m, z={msg.z:.2f} m")
-    
+
     def vehicle_status_callback(self, vehicle_status):
         """Callback function for vehicle_status topic subscriber."""
         self.vehicle_status = vehicle_status
@@ -129,19 +144,22 @@ class OffboardShipLandNode(Node):
     def arm(self):
         """Send an arm command to the vehicle."""
         self.publish_vehicle_command(
-            VehicleCommand.VEHICLE_CMD_COMPONENT_ARM_DISARM, param1=1.0)
-        self.get_logger().info('Arm command sent')
+            VehicleCommand.VEHICLE_CMD_COMPONENT_ARM_DISARM, param1=1.0
+        )
+        self.get_logger().info("Arm command sent")
 
     def disarm(self):
         """Send a disarm command to the vehicle."""
         self.publish_vehicle_command(
-            VehicleCommand.VEHICLE_CMD_COMPONENT_ARM_DISARM, param1=0.0)
-        self.get_logger().info('Disarm command sent')
+            VehicleCommand.VEHICLE_CMD_COMPONENT_ARM_DISARM, param1=0.0
+        )
+        self.get_logger().info("Disarm command sent")
 
     def engage_offboard_mode(self):
         """Switch to offboard mode."""
         self.publish_vehicle_command(
-            VehicleCommand.VEHICLE_CMD_DO_SET_MODE, param1=1.0, param2=6.0)
+            VehicleCommand.VEHICLE_CMD_DO_SET_MODE, param1=1.0, param2=6.0
+        )
         self.get_logger().info("Switching to offboard mode")
 
     def land(self):
@@ -149,7 +167,7 @@ class OffboardShipLandNode(Node):
         self.publish_vehicle_command(VehicleCommand.VEHICLE_CMD_NAV_LAND)
         self.get_logger().info("Switching to land mode")
         self.taken_off = False
-        #self.hit_figure_8 = False
+        # self.hit_figure_8 = False
 
     def offboard_move_callback(self):
         """Callback function for offboard movement along the path."""
@@ -160,7 +178,6 @@ class OffboardShipLandNode(Node):
             ready_to_land = horizontal_align and vertical_align and z < 2.0
 
             if not self.land_start_time:
-
                 if ready_to_land:
                     print("Ready to land, Hovering in Place!")
                     self.hover_cords = self.vehicle_local_position
@@ -190,9 +207,11 @@ class OffboardShipLandNode(Node):
                 if self.land_start_time + 1.5 < time.time():
                     print("Actually landing now")
                     self.tag_align_timer.cancel()
-                else: 
-                    print(f"Hover cords: {self.hover_cords}")
-                    self.publish_current_hover_setpoint(self.hover_cords[0], self.hover_cords[1])
+                else:
+                    hover = self.hover_cords
+                    print(f"Hover cords: {hover}")
+                    if hover is not None:
+                        self.publish_current_hover_setpoint(hover[0], hover[1])
 
     def publish_takeoff_setpoint(self, x: float, y: float, z: float):
         """Publish the trajectory setpoint."""
@@ -204,6 +223,8 @@ class OffboardShipLandNode(Node):
         self.trajectory_setpoint_publisher.publish(msg)
 
     def publish_move_horizontal_setpoint(self, tag_displacement_horizontal):
+        if self.vehicle_local_position is None:
+            return
         curr_x, curr_y, curr_z = self.vehicle_local_position
         step = tag_displacement_horizontal / 1.5
         if abs(step) > 2.0:
@@ -217,6 +238,8 @@ class OffboardShipLandNode(Node):
         self.trajectory_setpoint_publisher.publish(msg)
 
     def publish_move_vertical_setpoint(self, tag_displacement_vertical):
+        if self.vehicle_local_position is None:
+            return
         curr_x, curr_y, curr_z = self.vehicle_local_position
         step = tag_displacement_vertical / 1.5
         if abs(step) > 2.0:
@@ -229,7 +252,13 @@ class OffboardShipLandNode(Node):
         print(msg.position)
         self.trajectory_setpoint_publisher.publish(msg)
 
-    def publish_move_forward_setpoint(self, tag_displacement_horizontal, tag_displacement_vertical, tag_displacement_forward, desired_range = 3.0):
+    def publish_move_forward_setpoint(
+        self,
+        tag_displacement_horizontal,
+        tag_displacement_vertical,
+        tag_displacement_forward,
+        desired_range=3.0,
+    ):
         adjustment_horizontal = tag_displacement_horizontal / 1.5
         if abs(adjustment_horizontal) > 2.0:
             adjustment_horizontal = 2.0 if adjustment_horizontal > 0 else -2.0
@@ -238,19 +267,25 @@ class OffboardShipLandNode(Node):
         if abs(adjustment_vertical) > 2.0:
             adjustment_vertical = 2.0 if adjustment_vertical > 0 else -2.0
 
-        adjustment_forward = (tag_displacement_forward - desired_range) / 1.5 
+        adjustment_forward = (tag_displacement_forward - desired_range) / 1.5
         if abs(adjustment_forward) > 2.0:
             adjustment_forward = 2.0 if adjustment_forward > 0 else -2.0
 
+        if self.vehicle_local_position is None:
+            return
         curr_x, curr_y, curr_z = self.vehicle_local_position
         msg = TrajectorySetpoint()
-        msg.position = [curr_x + adjustment_forward, curr_y + adjustment_horizontal, self.altitude - adjustment_vertical]
+        msg.position = [
+            curr_x + adjustment_forward,
+            curr_y + adjustment_horizontal,
+            self.altitude - adjustment_vertical,
+        ]
         print(msg.position)
         msg.yaw = 0.0
         msg.timestamp = int(self.get_clock().now().nanoseconds / 1000)
         self.trajectory_setpoint_publisher.publish(msg)
 
-    def publish_current_hover_setpoint(self, x, y): 
+    def publish_current_hover_setpoint(self, x, y):
         msg = TrajectorySetpoint()
         msg.position = [x, y, self.altitude]
         print(msg.position)
@@ -299,6 +334,7 @@ class OffboardShipLandNode(Node):
         msg.timestamp = int(self.get_clock().now().nanoseconds / 1000)
         self.vehicle_command_publisher.publish(msg)
 
+
 def main(args=None) -> None:
     rclpy.init(args=args)
     offboard_ship_land_node = OffboardShipLandNode()
@@ -306,7 +342,8 @@ def main(args=None) -> None:
     offboard_ship_land_node.destroy_node()
     rclpy.shutdown()
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     try:
         main()
     except Exception as e:

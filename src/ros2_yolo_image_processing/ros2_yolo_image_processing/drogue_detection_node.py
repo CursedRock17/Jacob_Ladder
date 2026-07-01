@@ -5,12 +5,18 @@ from rclpy.qos import qos_profile_system_default, qos_profile_sensor_data
 
 # MSG Libraries
 from sensor_msgs.msg import Image
-from vision_msgs.msg import VisionInfo, Detection2D, Detection2DArray, ObjectHypothesisWithPose
+from vision_msgs.msg import (
+    VisionInfo,
+    Detection2D,
+    Detection2DArray,
+    ObjectHypothesisWithPose,
+)
 
 # OpenCV/Image Processing Libraries
 import numpy as np
 import cv2
 from cv_bridge import CvBridge
+import torch
 from ultralytics import YOLO
 
 # Your stream/frame size (used by ranging center math)
@@ -32,15 +38,18 @@ class DrogueDetectionNode(Node):
         :returns:
             None
         """
-        super().__init__('drogue_detection_node')
+        super().__init__("drogue_detection_node")
 
         # Find our local Pytorch Neural Network, then establish the tensors
-        self.MODEL_FILEPATH = '/home/cursedrock17/Documents/Electrical/Matrix_Lab/jacob_drone_ws/src/Jacob_Ladder/src/drogue_flight/models/best.pt'
+        self.MODEL_FILEPATH = (
+            "/home/usmsm/Jacob_Ladder/src/drogue_flight/models/best.pt"
+        )
         self.IMGSZ = 416
         self.CONF = 0.25
         self.IOU = 0.45
         # "cpu" for laptop/Pi, "0" for Jetson/CUDA GPU
-        self.DEVICE = self.declare_parameter('device', 'cpu').value
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+        self.DEVICE = self.declare_parameter("device", device).value
 
         # Frame skip flag: if YOLO is still running on a previous frame, drop new ones
         # rather than letting the subscription queue build up
@@ -65,26 +74,32 @@ class DrogueDetectionNode(Node):
         default_qos = qos_profile_system_default
 
         # ROS 2 parameters for runtime tuning
-        self.confidence_param = self.declare_parameter('min_score_thresh', self.CONF)
-        self.iou_thresh_param = self.declare_parameter('iou_thresh', self.IOU)
+        self.confidence_param = self.declare_parameter("min_score_thresh", self.CONF)
+        self.iou_thresh_param = self.declare_parameter("iou_thresh", self.IOU)
 
         # Create our Subscription to the camera feed.
         self.img_subscriber = self.create_subscription(
-            Image, 'image_raw', self.image_callback, qos_profile=sensor_qos)
+            Image, "image_raw", self.image_callback, qos_profile=sensor_qos
+        )
         self.opencv_bridge = CvBridge()
 
         # Create a Publisher for Information about our CV Pipeline
         self.vision_info_pub = self.create_publisher(
-            VisionInfo, 'vision_info', qos_profile=default_qos)
+            VisionInfo, "vision_info", qos_profile=default_qos
+        )
         # Create a publisher for the detected drogue on screen.
         self.detection_publisher = self.create_publisher(
-            Detection2DArray, 'detections', qos_profile=default_qos)
+            Detection2DArray, "detections", qos_profile=default_qos
+        )
         # Create a publisher which provides a new image with a bounding box around it.
         self.detected_image_publisher = self.create_publisher(
-            Image, 'detections_image', qos_profile=default_qos)
+            Image, "detections_image", qos_profile=default_qos
+        )
 
         # Adverstise our CV Info
-        self.publish_network_info(model_description="dnn", model_path=self.MODEL_FILEPATH)
+        self.publish_network_info(
+            model_description="dnn", model_path=self.MODEL_FILEPATH
+        )
         self.get_logger().info("Created Drogue Detection Node")
 
     def publish_network_info(self, model_description, model_path):
@@ -124,7 +139,7 @@ class DrogueDetectionNode(Node):
             conf=self.confidence_param.value,
             iou=self.iou_thresh_param.value,
             device=self.DEVICE,
-            verbose=False
+            verbose=False,
         )
         return img, results
 
@@ -200,11 +215,7 @@ class DrogueDetectionNode(Node):
                 # Draw on annotated image
                 color = (0, 255, 0) if cls_id == self.CLASS_DROGUE else (255, 0, 255)
                 cv2.rectangle(
-                    annotated_img,
-                    (int(x1), int(y1)),
-                    (int(x2), int(y2)),
-                    color,
-                    2
+                    annotated_img, (int(x1), int(y1)), (int(x2), int(y2)), color, 2
                 )
 
                 label = f"{cls_name} {conf:.2f}"
@@ -215,7 +226,7 @@ class DrogueDetectionNode(Node):
                     cv2.FONT_HERSHEY_SIMPLEX,
                     0.5,
                     color,
-                    2
+                    2,
                 )
 
         # Convert annotated image to ROS message
@@ -242,7 +253,8 @@ class DrogueDetectionNode(Node):
             img, yolo_results = self.process_image(img_msg)
 
             detections_msg, annotated_img_msg = self.create_detections_msg(
-                img, yolo_results, img_msg)
+                img, yolo_results, img_msg
+            )
 
             self.detection_publisher.publish(detections_msg)
             self.detected_image_publisher.publish(annotated_img_msg)
@@ -255,7 +267,8 @@ class DrogueDetectionNode(Node):
                 dt = (current_time - self.t_last).nanoseconds / 1e9
                 fps = float(camera_fps) / max(dt, 1e-6)
                 self.get_logger().info(
-                    f"FPS: {fps:.2f} | Detections: {len(detections_msg.detections)}")
+                    f"FPS: {fps:.2f} | Detections: {len(detections_msg.detections)}"
+                )
                 self.t_last = current_time
         finally:
             self._busy = False
@@ -275,5 +288,5 @@ def main(args=None):
     rclpy.shutdown()
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()

@@ -319,7 +319,6 @@ FrontApproachExecutor::FrontApproachExecutor(rclcpp::Node& node, px4_ros2::ModeB
 	: ModeExecutorBase(node, ModeExecutorBase::Settings{Settings::Activation::ActivateAlways}, owned_mode)
 	, _node(node)
 {
-	setSkipMessageCompatibilityCheck();
 	_node.declare_parameter<float>("takeoff_height", 2.5f);
 	_node.get_parameter("takeoff_height", _param_takeoff_height);
 }

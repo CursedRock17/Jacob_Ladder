@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-import json, socket
+import json
+import socket
 import rclpy
 from rclpy.node import Node
 from std_msgs.msg import Float32MultiArray
@@ -31,12 +32,15 @@ class UdpCouplerPub(Node):
         if not data:
             return
         try:
-            rng = json.loads(data.decode("utf-8"))["coupler"]["rng"]  # [dx, dy, wdist, dist]
+            rng = json.loads(data.decode("utf-8"))["coupler"][
+                "rng"
+            ]  # [dx, dy, wdist, dist]
             msg = Float32MultiArray()
             msg.data = [float(rng[0]), float(rng[3])]  # first + fourth
             self.pub.publish(msg)
         except Exception:
             pass
+
 
 def main():
     rclpy.init()
@@ -44,10 +48,13 @@ def main():
     try:
         rclpy.spin(node)
     finally:
-        try: node.sock.close()
-        except Exception: pass
+        try:
+            node.sock.close()
+        except Exception:
+            pass
         node.destroy_node()
         rclpy.shutdown()
+
 
 if __name__ == "__main__":
     main()

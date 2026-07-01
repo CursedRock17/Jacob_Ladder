@@ -19,6 +19,7 @@ flight_rosbags/
 
 # Tool and language caches
 .cache/
+.uv-cache/
 __pycache__/
 *.py[cod]
 *$py.class
