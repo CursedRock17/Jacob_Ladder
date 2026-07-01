@@ -8,6 +8,7 @@ dependencies = [
     "cuvslam",
     "depthai",
     "numpy",
+    "rerun",
     "ruff",
     "scipy",
     "ty",
