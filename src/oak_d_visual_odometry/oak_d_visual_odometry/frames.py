@@ -1,26 +1,19 @@
-"""Frame transform helpers (pure NumPy — no scipy dep).
+"""cuVSLAM/PX4 frame transform helpers.
 
-Three frames in play:
+cuVSLAM uses the OpenCV camera convention for the rig frame:
+  X right, Y down, Z forward.
 
-  * SAI world  — gravity-aligned. SpectacularAI default: Y points up
-                 (against gravity), X is the initial camera-forward
-                 direction projected onto the horizontal plane,
-                 Z = X x Y (initial right of the camera).
-  * Camera optical — X right, Y down, Z forward (out of lens).
-  * Body FRD   — X forward, Y right, Z down. PX4's body frame.
-  * NED world  — X north, Y east, Z down. PX4's world frame.
-
-We need to publish the body pose in NED, and the body angular velocity
-in body FRD, given:
-  - SAI's camera-in-SAI-world pose
-  - SAI's camera velocity in SAI world
-  - SAI's angular velocity in the camera optical frame
+PX4 expects external vision body pose in:
+  world NED: X north, Y east, Z down
+  body FRD: X forward, Y right, Z down
 """
+
 import numpy as np
 
 
-# Optical (X right, Y down, Z forward) -> FRD (X forward, Y right, Z down).
-# Columns are optical basis vectors expressed in FRD.
+# Optical/OpenCV (X right, Y down, Z forward) -> body FRD
+# (X forward, Y right, Z down).
+# Columns are optical basis vectors expressed in body FRD.
 R_BODY_FROM_CAM_OPTICAL = np.array([
     [0.0, 0.0, 1.0],
     [1.0, 0.0, 0.0],
@@ -28,50 +21,26 @@ R_BODY_FROM_CAM_OPTICAL = np.array([
 ])
 
 
-def r_ned_from_sai_world(init_yaw_offset_rad: float) -> np.ndarray:
-    """Rotation from SAI world (Y-up, X = initial-camera-forward) to NED.
+def r_ned_from_cuvslam_world(init_yaw_offset_rad: float) -> np.ndarray:
+    """Rotation from cuVSLAM startup world to NED.
 
-    `init_yaw_offset_rad` is the heading of the camera-forward axis at VIO
-    startup, measured clockwise from true North.
-    """
-    c = np.cos(init_yaw_offset_rad)
-    s = np.sin(init_yaw_offset_rad)
-    # Columns: SAI X (initial forward) -> (cos, sin, 0)_NED
-    #          SAI Y (up)              -> (0, 0, -1)_NED
-    #          SAI Z (initial right)   -> (-sin, cos, 0)_NED
-    return np.array([
-        [c,   0.0, -s],
-        [s,   0.0,  c],
-        [0.0, -1.0, 0.0],
-    ])
+    cuVSLAM initializes its world frame to the rig frame. For an upright
+    forward-facing rig, OpenCV +Z is forward, +X is right, and +Y is down.
 
-
-def r_ned_from_basalt_world(init_yaw_offset_rad: float) -> np.ndarray:
-    """Rotation from BasaltVIO world (FLU: X=forward, Y=left, Z=up) to NED.
-
-    `init_yaw_offset_rad` is the heading of the camera-forward axis at VIO
-    startup, measured clockwise from true North.
-
-    Columns are Basalt basis vectors expressed in NED:
-      Basalt X (forward at heading psi) -> ( cos psi,  sin psi,  0)
-      Basalt Y (left  at heading psi)   -> ( sin psi, -cos psi,  0)
-      Basalt Z (up)                     -> (       0,        0, -1)
+    `init_yaw_offset_rad` is the heading of camera-forward at startup,
+    measured clockwise from true north.
     """
     c = np.cos(init_yaw_offset_rad)
     s = np.sin(init_yaw_offset_rad)
     return np.array([
-        [c,   s,   0.0],
-        [s,  -c,   0.0],
-        [0.0, 0.0, -1.0],
+        [-s, 0.0, c],
+        [c,  0.0, s],
+        [0.0, 1.0, 0.0],
     ])
 
 
 def quat_to_rot(qx: float, qy: float, qz: float, qw: float) -> np.ndarray:
-    """Hamilton quaternion (x, y, z, w) -> 3x3 rotation matrix.
-
-    Returns R such that v_world = R @ v_local for a quaternion describing
-    the local frame's orientation in the world frame.
-    """
+    """Hamilton quaternion (x, y, z, w) -> 3x3 rotation matrix."""
     n = np.sqrt(qx * qx + qy * qy + qz * qz + qw * qw)
     if n == 0.0:
         return np.eye(3)
@@ -83,33 +52,35 @@ def quat_to_rot(qx: float, qy: float, qz: float, qw: float) -> np.ndarray:
     ])
 
 
-def rot_to_px4_quat(rot: np.ndarray) -> np.ndarray:
-    """3x3 rotation matrix -> PX4 quaternion (w, x, y, z) as float32[4].
+def rot_to_quat_xyzw(rot: np.ndarray) -> np.ndarray:
+    """3x3 rotation matrix -> Hamilton quaternion (x, y, z, w)."""
+    q_wxyz = rot_to_px4_quat(rot)
+    return np.array([q_wxyz[1], q_wxyz[2], q_wxyz[3], q_wxyz[0]], dtype=np.float64)
 
-    Uses Shepperd's branch-selecting method for numerical stability across
-    all rotations.
-    """
+
+def rot_to_px4_quat(rot: np.ndarray) -> np.ndarray:
+    """3x3 rotation matrix -> PX4 quaternion (w, x, y, z)."""
     tr = rot[0, 0] + rot[1, 1] + rot[2, 2]
     if tr > 0.0:
-        s = np.sqrt(tr + 1.0) * 2.0  # s = 4 * qw
+        s = np.sqrt(tr + 1.0) * 2.0
         w = 0.25 * s
         x = (rot[2, 1] - rot[1, 2]) / s
         y = (rot[0, 2] - rot[2, 0]) / s
         z = (rot[1, 0] - rot[0, 1]) / s
     elif (rot[0, 0] > rot[1, 1]) and (rot[0, 0] > rot[2, 2]):
-        s = np.sqrt(1.0 + rot[0, 0] - rot[1, 1] - rot[2, 2]) * 2.0  # s = 4 * qx
+        s = np.sqrt(1.0 + rot[0, 0] - rot[1, 1] - rot[2, 2]) * 2.0
         w = (rot[2, 1] - rot[1, 2]) / s
         x = 0.25 * s
         y = (rot[0, 1] + rot[1, 0]) / s
         z = (rot[0, 2] + rot[2, 0]) / s
     elif rot[1, 1] > rot[2, 2]:
-        s = np.sqrt(1.0 + rot[1, 1] - rot[0, 0] - rot[2, 2]) * 2.0  # s = 4 * qy
+        s = np.sqrt(1.0 + rot[1, 1] - rot[0, 0] - rot[2, 2]) * 2.0
         w = (rot[0, 2] - rot[2, 0]) / s
         x = (rot[0, 1] + rot[1, 0]) / s
         y = 0.25 * s
         z = (rot[1, 2] + rot[2, 1]) / s
     else:
-        s = np.sqrt(1.0 + rot[2, 2] - rot[0, 0] - rot[1, 1]) * 2.0  # s = 4 * qz
+        s = np.sqrt(1.0 + rot[2, 2] - rot[0, 0] - rot[1, 1]) * 2.0
         w = (rot[1, 0] - rot[0, 1]) / s
         x = (rot[0, 2] + rot[2, 0]) / s
         y = (rot[1, 2] + rot[2, 1]) / s
@@ -118,44 +89,20 @@ def rot_to_px4_quat(rot: np.ndarray) -> np.ndarray:
 
 
 def transform_pose(
-    p_world_cam: np.ndarray,        # camera origin in SAI world (3,)
-    R_world_cam: np.ndarray,        # camera orientation in SAI world (3x3)
-    R_body_cam: np.ndarray,         # camera optical -> body FRD (3x3)
-    t_body_cam: np.ndarray,         # camera origin in body FRD (3,)
-    R_ned_world: np.ndarray,        # SAI world -> NED (3x3)
-):
-    """Compose body pose in NED.
+    p_world_rig: np.ndarray,
+    R_world_rig: np.ndarray,
+    R_body_rig: np.ndarray,
+    t_body_rig: np.ndarray,
+    R_ned_world: np.ndarray,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Compose body pose in NED from cuVSLAM rig pose.
 
-    Returns (p_ned_body, R_ned_body).
-
-    Math:
-        T_world_body = T_world_cam * T_body_cam^-1
-        T_ned_body   = T_ned_world * T_world_body
+    `t_body_rig` is the rig origin expressed in body FRD.
     """
-    R_cam_body = R_body_cam.T
-    R_world_body = R_world_cam @ R_cam_body
-    p_world_body = p_world_cam - R_world_body @ t_body_cam
+    R_rig_body = R_body_rig.T
+    R_world_body = R_world_rig @ R_rig_body
+    p_world_body = p_world_rig - R_world_body @ t_body_rig
 
     R_ned_body = R_ned_world @ R_world_body
     p_ned_body = R_ned_world @ p_world_body
     return p_ned_body, R_ned_body
-
-
-def transform_velocity_world(
-    v_world_cam: np.ndarray,
-    R_ned_world: np.ndarray,
-) -> np.ndarray:
-    """Camera linear velocity in SAI world -> body linear velocity in NED.
-
-    Lever-arm correction (omega x r_body_cam) is neglected; for typical
-    OAK-D mount distances this is sub-cm/s and EKF2 absorbs it.
-    """
-    return R_ned_world @ v_world_cam
-
-
-def transform_angular_velocity(
-    omega_optical: np.ndarray,
-    R_body_cam: np.ndarray,
-) -> np.ndarray:
-    """Angular velocity in camera optical frame -> body FRD frame."""
-    return R_body_cam @ omega_optical

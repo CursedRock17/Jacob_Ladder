@@ -1,3 +1,6 @@
 depthai>=2.22.0.0
 numpy>=1.21.4,<2
 opencv-python<4.0.0
+# PyCuVSLAM is distributed as platform-specific NVIDIA release wheels.
+# For the current Jetson/CUDA target, use the root pyproject.toml/uv setup
+# or install a matching wheel from https://github.com/nvidia-isaac/cuVSLAM.

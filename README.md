@@ -19,7 +19,7 @@ START HERE:
 | [drogue_flight](src/drogue_flight) | TODO: In-Progress Porting for flying to a detected KC-130 drogue |
 | [jacob_manual](src/jacob_manual)  | ROS 2 External Modes that Require Manual Control to get in the air, but fly autonomous missions after |
 | [precision_land](src/precision_land)  | ROS 2 External Modes that fly autonomous missions for object detection, trajectory planning, and landing
-| [oak_d_visual_odometry](src/oak_d_visual_odometry)  | ROS 2 nodes for any Luxonis camera that uses DepthAI API, meant for stereo/depth cameras **with** an IMU which provides visual odometry (VIO) data for flight.
+| [oak_d_visual_odometry](src/oak_d_visual_odometry)  | ROS 2 nodes for OAK-D visual odometry using NVIDIA cuVSLAM, with optional PX4 `VehicleOdometry` output for flight. |
 | [px4-ros2-interface-lib](src/px4-ros2-interface-lib) | Should NOT be Altered : Use Given Branch -> ROS 2 <-> PX4 Bridge, allows us to create External Modes |
 | [px4_msgs](src/px4_msgs) | Should NOT be Altered : Use Given Branch -> PX4 Messages for ROS 2 Communication |
 | [px4_msgs_old](src/px4_msgs_old) | Should NOT be Altered : Use Given Branch -> More PX4 Messages for ROS 2 Communication |

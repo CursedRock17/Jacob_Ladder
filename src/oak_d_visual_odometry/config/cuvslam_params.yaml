@@ -1,0 +1,58 @@
+oak_d_cuvslam_publisher:
+  ros__parameters:
+    width: 640
+    height: 400
+    camera_fps: 30.0
+    rgb_fps: 15.0
+    warmup_frames: 30
+    publish_rgb: true
+    publish_stereo_images: false
+    publish_imu: true
+    enable_imu_fusion: false
+    use_gpu: true
+    async_sba: false
+    rectified_stereo_camera: false
+    world_frame_id: cuvslam_world
+    rig_frame_id: oak_camera
+    left_frame_id: oak_left_camera
+    right_frame_id: oak_right_camera
+    imu_frame_id: oak_imu
+    odom_topic: /slam/odometry
+    imu_topic: /imu/data
+    rgb_topic: /rgb/image
+    rgb_camera_info_topic: /rgb/camera_info
+    left_image_topic: /left/image
+    right_image_topic: /right/image
+    left_camera_info_topic: /left/camera_info
+    right_camera_info_topic: /right/camera_info
+
+oak_d_cuvslam_px4_publisher:
+  ros__parameters:
+    width: 640
+    height: 400
+    camera_fps: 30.0
+    rgb_fps: 15.0
+    warmup_frames: 30
+    publish_rgb: true
+    publish_stereo_images: false
+    publish_imu: true
+    enable_imu_fusion: false
+    use_gpu: true
+    async_sba: false
+    rectified_stereo_camera: false
+    world_frame_id: cuvslam_world
+    rig_frame_id: oak_camera
+    left_frame_id: oak_left_camera
+    right_frame_id: oak_right_camera
+    imu_frame_id: oak_imu
+    odom_topic: /slam/odometry
+    imu_topic: /imu/data
+    rgb_topic: /rgb/image
+    rgb_camera_info_topic: /rgb/camera_info
+    px4_topic: /fmu/in/vehicle_visual_odometry
+    init_yaw_offset_deg: 0.0
+    t_body_cam: [0.0, 0.0, 0.0]
+    R_body_cam_override: []
+    position_variance: [0.01, 0.01, 0.02]
+    orientation_variance: [0.01, 0.01, 0.02]
+    velocity_variance: [0.1, 0.1, 0.1]
