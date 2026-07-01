@@ -12,7 +12,7 @@ find_package(px4_msgs REQUIRED)
 find_package(sensor_msgs REQUIRED)
 find_package(geometry_msgs REQUIRED)
 find_package(cv_bridge REQUIRED)
-find_package(OpenCV 4 REQUIRED)
+find_package(OpenCV 4 REQUIRED COMPONENTS core imgproc calib3d aruco)
 
 include_directories(${Eigen3_INCLUDE_DIRS})
 include_directories(${OpenCV_INCLUDE_DIRS})

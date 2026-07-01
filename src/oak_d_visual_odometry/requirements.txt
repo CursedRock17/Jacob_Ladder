@@ -1,8 +1,0 @@
-# Prefer the repo root pyproject.toml and uv.lock:
-#   uv venv --python 3.10 --system-site-packages .venv
-#   uv sync
-depthai>=2.22.0.0
-numpy>=1.24,<2
-# PyCuVSLAM is distributed as platform-specific NVIDIA release wheels.
-# For the current Jetson/CUDA target, use the root pyproject.toml/uv setup
-# or install a matching wheel from https://github.com/nvidia-isaac/cuVSLAM.

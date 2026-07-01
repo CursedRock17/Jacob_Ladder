@@ -21,14 +21,6 @@ uv sync
 source .venv/bin/activate
 ```
 
-If you are not using `uv`, install the `cuvslam` wheel that matches the target
-Jetson/Python/CUDA combination from NVIDIA's cuVSLAM releases, then install the
-generic package requirements:
-
-```bash
-pip install -r src/oak_d_visual_odometry/requirements.txt
-```
-
 `pyproject.toml` pins `numpy<2` because many ROS 2 `cv_bridge` builds are
 compiled against NumPy 1.x. Do not install a separate `opencv-python` wheel for
 this node; use the JetPack/system OpenCV that matches `cv_bridge`.

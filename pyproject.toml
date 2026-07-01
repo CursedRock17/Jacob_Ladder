@@ -14,5 +14,11 @@ dependencies = [
     "ty",
 ]
 
+[project.optional-dependencies]
+yolo = [
+    "opencv-python==4.9.0.80",
+    "ultralytics",
+]
+
 [tool.uv.sources]
 cuvslam = { url = "https://github.com/nvidia-isaac/cuVSLAM/releases/download/v16.0.0/cuvslam-16.0.0+cu12-cp310-cp310-manylinux_2_35_aarch64.whl" }

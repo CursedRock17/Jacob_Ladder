@@ -24,6 +24,13 @@ source /opt/ros/humble/setup.bash
 source install/setup.bash  # after colcon build
 ```
 
+Install the YOLO/drogue image-processing dependencies from the same uv
+environment when needed:
+
+```bash
+uv sync --extra yolo
+```
+
 START HERE:
 
 | Package | Objective |

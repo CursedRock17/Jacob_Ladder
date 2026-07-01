@@ -14,6 +14,10 @@
 version="${OPENCV_VERSION:-4.10.0}"
 folder="${OPENCV_SRC_DIR:-$HOME/opencv_src}"
 install_prefix="${OPENCV_INSTALL_PREFIX:-/usr/local}"
+build_list="${OPENCV_BUILD_LIST:-core,imgproc,imgcodecs,videoio,highgui,calib3d,features2d,objdetect,aruco}"
+build_python="${OPENCV_BUILD_PYTHON:-OFF}"
+with_cuda="${OPENCV_WITH_CUDA:-ON}"
+with_cudnn="${OPENCV_WITH_CUDNN:-ON}"
 default_build_jobs="$(($(nproc) - 1))"
 if [ "${default_build_jobs}" -lt 1 ]; then
     default_build_jobs=1
@@ -77,10 +81,13 @@ cd "opencv-${version}/"
 echo "------------------------------------"
 echo "** Build opencv "${version}" (3/4)"
 echo "------------------------------------"
+if [ "${OPENCV_CLEAN_BUILD:-0}" = "1" ]; then
+    rm -rf release
+fi
 mkdir -p release
 cd release/
 # CUDA_ARCH_BIN 8.7 is AGX orin
-cmake -D WITH_CUDA=ON -D WITH_CUDNN=ON -D CUDA_ARCH_BIN="7.2,8.7" -D CUDA_ARCH_PTX="" -D OPENCV_GENERATE_PKGCONFIG=ON -D OPENCV_EXTRA_MODULES_PATH=../../opencv_contrib-${version}/modules -D WITH_GSTREAMER=ON -D WITH_LIBV4L=ON -D BUILD_opencv_python3=ON -D BUILD_TESTS=OFF -D BUILD_PERF_TESTS=OFF -D BUILD_EXAMPLES=OFF -D CMAKE_BUILD_TYPE=RELEASE -D CMAKE_INSTALL_PREFIX="${install_prefix}" ..
+cmake -D WITH_CUDA="${with_cuda}" -D WITH_CUDNN="${with_cudnn}" -D CUDA_ARCH_BIN="7.2,8.7" -D CUDA_ARCH_PTX="" -D OPENCV_GENERATE_PKGCONFIG=ON -D OPENCV_EXTRA_MODULES_PATH=../../opencv_contrib-${version}/modules -D BUILD_LIST="${build_list}" -D WITH_GSTREAMER=ON -D WITH_LIBV4L=ON -D BUILD_opencv_python3="${build_python}" -D BUILD_JAVA=OFF -D BUILD_TESTS=OFF -D BUILD_PERF_TESTS=OFF -D BUILD_EXAMPLES=OFF -D CMAKE_BUILD_TYPE=RELEASE -D CMAKE_INSTALL_PREFIX="${install_prefix}" ..
 # save a core
 make -j"${build_jobs}"
 

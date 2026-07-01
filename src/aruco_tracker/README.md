@@ -12,6 +12,22 @@ A ROS 2 node that detects [ArUco markers](https://docs.opencv.org/4.x/d5/dae/tut
 
 Once valid camera intrinsics are received, the node unsubscribes from `/camera_info` since the calibration doesn't change mid-flight.
 
+## OpenCV Dependency
+
+`aruco_tracker` requires the OpenCV ArUco contrib module. The NVIDIA Jetson
+OpenCV package may provide OpenCV without `opencv2/aruco.hpp`; build the repo's
+OpenCV contrib install when that header is missing:
+
+```bash
+REMOVE_DEFAULT_OPENCV=no \
+OPENCV_CLEAN_BUILD=1 \
+OPENCV_WITH_CUDA=OFF \
+OPENCV_WITH_CUDNN=OFF \
+./installation_scripts/install_opencv.sh
+```
+
+This installs the ArUco-focused OpenCV 4.10 build to `/usr/local` by default.
+
 ## Parameters
 
 Configured via `cfg/params.yaml` or overridden at launch:
