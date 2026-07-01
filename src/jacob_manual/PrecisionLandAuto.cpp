@@ -469,8 +469,6 @@ PrecisionLandAutoExecutor::PrecisionLandAutoExecutor(rclcpp::Node& node, px4_ros
 	: ModeExecutorBase(node, ModeExecutorBase::Settings{Settings::Activation::ActivateAlways}, owned_mode)
 	, _node(node)
 {
-	setSkipMessageCompatibilityCheck();
-
 	// Mode constructor already declared target_height; grab it here for altitude monitoring
 	if (_node.has_parameter("target_height")) {
 		_node.get_parameter("target_height", _target_height);

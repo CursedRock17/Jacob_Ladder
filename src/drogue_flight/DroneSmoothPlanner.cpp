@@ -423,7 +423,6 @@ DroneSmoothPlannerExecutor::DroneSmoothPlannerExecutor(rclcpp::Node& node, px4_r
 	: ModeExecutorBase(node, ModeExecutorBase::Settings{Settings::Activation::ActivateAlways}, owned_mode)
 	, _node(node)
 {
-	setSkipMessageCompatibilityCheck();
 	// Takeoff altitude is configurable at launch time
 	_node.declare_parameter<float>("takeoff_height", 2.5f);
 	_node.get_parameter("takeoff_height", _param_takeoff_height);

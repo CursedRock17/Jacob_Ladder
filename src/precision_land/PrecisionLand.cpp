@@ -461,7 +461,6 @@ PrecisionLandExecutor::PrecisionLandExecutor(rclcpp::Node& node, px4_ros2::ModeB
 	: ModeExecutorBase(node, ModeExecutorBase::Settings{Settings::Activation::ActivateAlways}, owned_mode)
 	, _node(node)
 {
-	setSkipMessageCompatibilityCheck();
 }
 
 void PrecisionLandExecutor::onActivate()

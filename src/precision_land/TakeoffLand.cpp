@@ -143,7 +143,6 @@ TakeoffLandExecutor::TakeoffLandExecutor(rclcpp::Node& node, px4_ros2::ModeBase&
 	: ModeExecutorBase(node, ModeExecutorBase::Settings{Settings::Activation::ActivateAlways}, owned_mode)
 	, _node(node)
 {
-	setSkipMessageCompatibilityCheck();
 	_node.declare_parameter<float>("hold_duration", 5.0f);
 	_node.get_parameter("hold_duration", _param_hold_duration);
 }

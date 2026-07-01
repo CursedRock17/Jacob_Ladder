@@ -438,7 +438,6 @@ FrontApproachPrecisionLandExecutor::FrontApproachPrecisionLandExecutor(rclcpp::N
 	: ModeExecutorBase(node, ModeExecutorBase::Settings{Settings::Activation::ActivateAlways}, owned_mode)
 	, _node(node)
 {
-	setSkipMessageCompatibilityCheck();
 }
 
 void FrontApproachPrecisionLandExecutor::onActivate()

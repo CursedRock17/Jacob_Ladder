@@ -154,7 +154,6 @@ TakeoffHoldExecutor::TakeoffHoldExecutor(rclcpp::Node& node, TakeoffHoldMode& ow
 	, _node(node)
 	, _mode(owned_mode)
 {
-	setSkipMessageCompatibilityCheck();
 }
 
 void TakeoffHoldExecutor::onActivate()
