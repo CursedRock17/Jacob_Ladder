@@ -9,6 +9,7 @@ dependencies = [
     "depthai",
     "numpy",
     "rerun",
+    "rerun-sdk",
     "ruff",
     "scipy",
     "ty",
