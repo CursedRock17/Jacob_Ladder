@@ -26,7 +26,7 @@ class PoseEstimationNode(Node):
         :returns:
             None
         """
-        super().__init__('dnn_ranging_node')
+        super().__init__("dnn_ranging_node")
 
         self.FRAME_W = 1024
         self.FRAME_H = 768
@@ -47,10 +47,15 @@ class PoseEstimationNode(Node):
         default_qos = qos_profile_system_default
         # Create our Subscription to the array of Bounding Boxes
         self.bbox_subscriber = self.create_subscription(
-            Detection2DArray, 'detections', self.detections_callback, qos_profile=default_qos)
+            Detection2DArray,
+            "detections",
+            self.detections_callback,
+            qos_profile=default_qos,
+        )
         # Create our Publisher for the pose
         self.pose_publisher = self.create_publisher(
-            PoseStamped, 'tag_dectections', qos_profile=default_qos)
+            PoseStamped, "tag_dectections", qos_profile=default_qos
+        )
 
         # Log it
         self.get_logger().info("Created Pose Estimation Node")
@@ -116,7 +121,12 @@ class PoseEstimationNode(Node):
         CombinedOffset = np.hypot(OffsetDistancex, OffsetDistancey)
         FinalDistance = np.hypot(WeightedDistance, CombinedOffset)
 
-        return [float(OffsetDistancex), float(OffsetDistancey), float(WeightedDistance), float(FinalDistance)]
+        return [
+            float(OffsetDistancex),
+            float(OffsetDistancey),
+            float(WeightedDistance),
+            float(FinalDistance),
+        ]
 
     def apply_pc_and_norm(self, rng4, pc=None):
         # Adjust if needed
@@ -179,9 +189,11 @@ class PoseEstimationNode(Node):
         """
         # Find best coupler and drogue using pick_best_by_class
         coupler_det = self.pick_best_by_class(
-            detections_msg.detections, self.CLASS_COUPLER)
+            detections_msg.detections, self.CLASS_COUPLER
+        )
         drogue_det = self.pick_best_by_class(
-            detections_msg.detections, self.CLASS_DROGUE)
+            detections_msg.detections, self.CLASS_DROGUE
+        )
 
         # Initialize outputs
         coupler_out = [0.0, 0.0, 0.0, 0.0]
@@ -194,7 +206,8 @@ class PoseEstimationNode(Node):
             coupler_out = self.apply_pc_and_norm(coupler_out)
             self.get_logger().debug(
                 f"Coupler: x={coupler_out[0]:.2f}, y={coupler_out[1]:.2f}, "
-                f"z={coupler_out[2]:.2f}, dist={coupler_out[3]:.2f}")
+                f"z={coupler_out[2]:.2f}, dist={coupler_out[3]:.2f}"
+            )
 
         # Calculate ranging for drogue using ranging_function
         if drogue_det is not None:
@@ -203,7 +216,8 @@ class PoseEstimationNode(Node):
             drogue_out = self.apply_pc_and_norm(drogue_out)
             self.get_logger().debug(
                 f"Drogue: x={drogue_out[0]:.2f}, y={drogue_out[1]:.2f}, "
-                f"z={drogue_out[2]:.2f}, dist={drogue_out[3]:.2f}")
+                f"z={drogue_out[2]:.2f}, dist={drogue_out[3]:.2f}"
+            )
 
         # Same output shape as your original Snapshot(): 8 values
         snapshot_out = coupler_out + drogue_out
@@ -240,7 +254,8 @@ class PoseEstimationNode(Node):
         self.get_logger().debug(
             f"Published pose to {target}: "
             f"[{pose_data[0]:.2f}, {pose_data[1]:.2f}, {pose_data[2]:.2f}] "
-            f"dist={pose_data[3]:.2f}")
+            f"dist={pose_data[3]:.2f}"
+        )
 
 
 def main(args=None):
@@ -257,5 +272,5 @@ def main(args=None):
     rclpy.shutdown()
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()

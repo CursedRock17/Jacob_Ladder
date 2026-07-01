@@ -20,22 +20,26 @@ import numpy as np
 #   cam X (right)   -> body Y (right)
 #   cam Y (down)    -> body Z (down)
 #   cam Z (forward) -> body X (forward)
-R_BODY_FROM_CAM_OPTICAL = np.array([
-    [0.0, 0.0, 1.0],
-    [1.0, 0.0, 0.0],
-    [0.0, 1.0, 0.0],
-])
+R_BODY_FROM_CAM_OPTICAL = np.array(
+    [
+        [0.0, 0.0, 1.0],
+        [1.0, 0.0, 0.0],
+        [0.0, 1.0, 0.0],
+    ]
+)
 
 # Down-facing: the lens looks along body-down (nadir), with the top of the
 # image toward the front of the drone (image "up" == body forward).
 #   cam X (right)   -> body Y (right)
 #   cam Y (down)    -> body -X (aft, since image-up is forward)
 #   cam Z (forward) -> body Z (down)
-R_BODY_FROM_CAM_OPTICAL_DOWN = np.array([
-    [0.0, -1.0, 0.0],
-    [1.0,  0.0, 0.0],
-    [0.0,  0.0, 1.0],
-])
+R_BODY_FROM_CAM_OPTICAL_DOWN = np.array(
+    [
+        [0.0, -1.0, 0.0],
+        [1.0, 0.0, 0.0],
+        [0.0, 0.0, 1.0],
+    ]
+)
 
 
 def r_ned_from_body_level(init_yaw_offset_rad: float) -> np.ndarray:
@@ -47,11 +51,13 @@ def r_ned_from_body_level(init_yaw_offset_rad: float) -> np.ndarray:
     """
     c = np.cos(init_yaw_offset_rad)
     s = np.sin(init_yaw_offset_rad)
-    return np.array([
-        [c, -s, 0.0],
-        [s,  c, 0.0],
-        [0.0, 0.0, 1.0],
-    ])
+    return np.array(
+        [
+            [c, -s, 0.0],
+            [s, c, 0.0],
+            [0.0, 0.0, 1.0],
+        ]
+    )
 
 
 def r_ned_from_cuvslam_world(
@@ -78,11 +84,25 @@ def quat_to_rot(qx: float, qy: float, qz: float, qw: float) -> np.ndarray:
     if n == 0.0:
         return np.eye(3)
     qx, qy, qz, qw = qx / n, qy / n, qz / n, qw / n
-    return np.array([
-        [1 - 2 * (qy * qy + qz * qz), 2 * (qx * qy - qz * qw),     2 * (qx * qz + qy * qw)],
-        [2 * (qx * qy + qz * qw),     1 - 2 * (qx * qx + qz * qz), 2 * (qy * qz - qx * qw)],
-        [2 * (qx * qz - qy * qw),     2 * (qy * qz + qx * qw),     1 - 2 * (qx * qx + qy * qy)],
-    ])
+    return np.array(
+        [
+            [
+                1 - 2 * (qy * qy + qz * qz),
+                2 * (qx * qy - qz * qw),
+                2 * (qx * qz + qy * qw),
+            ],
+            [
+                2 * (qx * qy + qz * qw),
+                1 - 2 * (qx * qx + qz * qz),
+                2 * (qy * qz - qx * qw),
+            ],
+            [
+                2 * (qx * qz - qy * qw),
+                2 * (qy * qz + qx * qw),
+                1 - 2 * (qx * qx + qy * qy),
+            ],
+        ]
+    )
 
 
 def rot_to_quat_xyzw(rot: np.ndarray) -> np.ndarray:

@@ -38,23 +38,25 @@ from rcl_interfaces.msg import ParameterDescriptor
 from rclpy.exceptions import ParameterUninitializedException
 from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
-from rclpy.parameter import Parameter
 from rclpy.qos import DurabilityPolicy, HistoryPolicy, QoSProfile, ReliabilityPolicy
 
 from . import frames
 
 try:
     import cuvslam as vslam
+
     CUVSLAM_IMPORT_ERROR = None
 except ImportError as exc:
-    vslam = None
+    # Optional dependency: fall back to None on hosts without the wheel.
+    vslam = None  # ty: ignore[invalid-assignment]
     CUVSLAM_IMPORT_ERROR = exc
 
 try:
     from px4_msgs.msg import VehicleOdometry
+
     PX4_AVAILABLE = True
 except ImportError:
-    VehicleOdometry = None
+    VehicleOdometry = None  # ty: ignore[invalid-assignment]
     PX4_AVAILABLE = False
 
 
@@ -78,7 +80,9 @@ class ImuSample:
 
 class CuVslamPublisherNode(Node):
     def __init__(self, publish_px4: bool = False):
-        node_name = "oak_d_cuvslam_px4_publisher" if publish_px4 else "oak_d_cuvslam_publisher"
+        node_name = (
+            "oak_d_cuvslam_px4_publisher" if publish_px4 else "oak_d_cuvslam_publisher"
+        )
         super().__init__(node_name)
 
         if vslam is None:
@@ -93,21 +97,25 @@ class CuVslamPublisherNode(Node):
         self._load_params()
 
         self.odometry_publisher = self.create_publisher(
-            PoseStamped, self._odom_topic, PUBLISHER_QUEUE_SIZE)
+            PoseStamped, self._odom_topic, PUBLISHER_QUEUE_SIZE
+        )
         self.tf_broadcaster = TransformBroadcaster(self)
 
         self.imu_publisher = None
         if self._publish_imu:
             self.imu_publisher = self.create_publisher(
-                Imu, self._imu_topic, PUBLISHER_QUEUE_SIZE)
+                Imu, self._imu_topic, PUBLISHER_QUEUE_SIZE
+            )
 
         self.rgb_publisher = None
         self.rgb_camera_info_publisher = None
         if self._publish_rgb:
             self.rgb_publisher = self.create_publisher(
-                Image, self._rgb_topic, PUBLISHER_QUEUE_SIZE)
+                Image, self._rgb_topic, PUBLISHER_QUEUE_SIZE
+            )
             self.rgb_camera_info_publisher = self.create_publisher(
-                CameraInfo, self._rgb_camera_info_topic, PUBLISHER_QUEUE_SIZE)
+                CameraInfo, self._rgb_camera_info_topic, PUBLISHER_QUEUE_SIZE
+            )
 
         self.left_image_publisher = None
         self.right_image_publisher = None
@@ -115,30 +123,40 @@ class CuVslamPublisherNode(Node):
         self.right_camera_info_publisher = None
         if self._publish_stereo_images:
             self.left_image_publisher = self.create_publisher(
-                Image, self._left_image_topic, PUBLISHER_QUEUE_SIZE)
+                Image, self._left_image_topic, PUBLISHER_QUEUE_SIZE
+            )
             self.right_image_publisher = self.create_publisher(
-                Image, self._right_image_topic, PUBLISHER_QUEUE_SIZE)
+                Image, self._right_image_topic, PUBLISHER_QUEUE_SIZE
+            )
             self.left_camera_info_publisher = self.create_publisher(
-                CameraInfo, self._left_camera_info_topic, PUBLISHER_QUEUE_SIZE)
+                CameraInfo, self._left_camera_info_topic, PUBLISHER_QUEUE_SIZE
+            )
             self.right_camera_info_publisher = self.create_publisher(
-                CameraInfo, self._right_camera_info_topic, PUBLISHER_QUEUE_SIZE)
+                CameraInfo, self._right_camera_info_topic, PUBLISHER_QUEUE_SIZE
+            )
 
         self.features_image_publisher = None
         self.features_camera_info_publisher = None
         if self._publish_features:
             self.features_image_publisher = self.create_publisher(
-                Image, self._features_image_topic, PUBLISHER_QUEUE_SIZE)
+                Image, self._features_image_topic, PUBLISHER_QUEUE_SIZE
+            )
             self.features_camera_info_publisher = self.create_publisher(
-                CameraInfo, self._features_camera_info_topic, PUBLISHER_QUEUE_SIZE)
+                CameraInfo, self._features_camera_info_topic, PUBLISHER_QUEUE_SIZE
+            )
 
         if self._publish_px4_requested and PX4_AVAILABLE:
             self.px4_publisher = self.create_publisher(
-                VehicleOdometry, self._px4_topic, PX4_QOS)
-            self.get_logger().info(f"PX4 VehicleOdometry publisher enabled on {self._px4_topic}")
+                VehicleOdometry, self._px4_topic, PX4_QOS
+            )
+            self.get_logger().info(
+                f"PX4 VehicleOdometry publisher enabled on {self._px4_topic}"
+            )
         elif self._publish_px4_requested:
             self.px4_publisher = None
             self.get_logger().warn(
-                "px4_msgs not importable; /fmu/in/vehicle_visual_odometry disabled")
+                "px4_msgs not importable; /fmu/in/vehicle_visual_odometry disabled"
+            )
         else:
             self.px4_publisher = None
 
@@ -163,7 +181,8 @@ class CuVslamPublisherNode(Node):
 
         mode = "stereo+IMU" if self._enable_imu_fusion else "stereo"
         self.get_logger().info(
-            f"{node_name} started; opening OAK-D DepthAI pipeline for cuVSLAM ({mode})")
+            f"{node_name} started; opening OAK-D DepthAI pipeline for cuVSLAM ({mode})"
+        )
 
     # ---------- parameters ----------
 
@@ -220,7 +239,8 @@ class CuVslamPublisherNode(Node):
         # type and would stay uninitialized, which breaks the get_parameters
         # service used by Foxglove/rqt.
         self.declare_parameter(
-            "R_body_cam_override", [], ParameterDescriptor(dynamic_typing=True))
+            "R_body_cam_override", [], ParameterDescriptor(dynamic_typing=True)
+        )
         self.declare_parameter("position_variance", [0.01, 0.01, 0.02])
         self.declare_parameter("orientation_variance", [0.01, 0.01, 0.02])
         self.declare_parameter("velocity_variance", [0.1, 0.1, 0.1])
@@ -247,21 +267,28 @@ class CuVslamPublisherNode(Node):
         self._warmup_frames = int(self.get_parameter("warmup_frames").value)
 
         self._publish_rgb = bool(self.get_parameter("publish_rgb").value)
-        self._publish_stereo_images = bool(self.get_parameter("publish_stereo_images").value)
+        self._publish_stereo_images = bool(
+            self.get_parameter("publish_stereo_images").value
+        )
         self._publish_features = bool(self.get_parameter("publish_features").value)
-        self._feature_point_radius = max(1, int(self.get_parameter("feature_point_radius").value))
+        self._feature_point_radius = max(
+            1, int(self.get_parameter("feature_point_radius").value)
+        )
         self._publish_imu = bool(self.get_parameter("publish_imu").value)
         self._enable_imu_fusion = bool(self.get_parameter("enable_imu_fusion").value)
         self._imu_rate_hz = int(self.get_parameter("imu_rate_hz").value)
 
         self._rectified_stereo_camera = bool(
-            self.get_parameter("rectified_stereo_camera").value)
+            self.get_parameter("rectified_stereo_camera").value
+        )
         self._use_gpu = bool(self.get_parameter("use_gpu").value)
         self._async_sba = bool(self.get_parameter("async_sba").value)
         self._enable_final_landmarks_export = bool(
-            self.get_parameter("enable_final_landmarks_export").value)
+            self.get_parameter("enable_final_landmarks_export").value
+        )
         self._enable_observations_export = bool(
-            self.get_parameter("enable_observations_export").value)
+            self.get_parameter("enable_observations_export").value
+        )
         self._verbosity = int(self.get_parameter("verbosity").value)
 
         self._left_border_mask = self._list_param("left_border_mask", 4, int)
@@ -277,20 +304,27 @@ class CuVslamPublisherNode(Node):
         self._imu_topic = str(self.get_parameter("imu_topic").value)
         self._rgb_topic = str(self.get_parameter("rgb_topic").value)
         self._rgb_camera_info_topic = str(
-            self.get_parameter("rgb_camera_info_topic").value)
+            self.get_parameter("rgb_camera_info_topic").value
+        )
         self._left_image_topic = str(self.get_parameter("left_image_topic").value)
         self._right_image_topic = str(self.get_parameter("right_image_topic").value)
         self._left_camera_info_topic = str(
-            self.get_parameter("left_camera_info_topic").value)
+            self.get_parameter("left_camera_info_topic").value
+        )
         self._right_camera_info_topic = str(
-            self.get_parameter("right_camera_info_topic").value)
+            self.get_parameter("right_camera_info_topic").value
+        )
         self._features_image_topic = str(
-            self.get_parameter("features_image_topic").value)
+            self.get_parameter("features_image_topic").value
+        )
         self._features_camera_info_topic = str(
-            self.get_parameter("features_camera_info_topic").value)
+            self.get_parameter("features_camera_info_topic").value
+        )
         self._px4_topic = str(self.get_parameter("px4_topic").value)
 
-        self._t_body_cam = np.array(self._list_param("t_body_cam", 3, float), dtype=np.float64)
+        self._t_body_cam = np.array(
+            self._list_param("t_body_cam", 3, float), dtype=np.float64
+        )
 
         # The camera mounting (optical -> body FRD) must be resolved before the
         # world->NED rotation, because cuVSLAM's world frame starts aligned with
@@ -307,20 +341,25 @@ class CuVslamPublisherNode(Node):
 
         yaw_deg = float(self.get_parameter("init_yaw_offset_deg").value)
         self._R_ned_world = frames.r_ned_from_cuvslam_world(
-            math.radians(yaw_deg), self._R_body_cam)
+            math.radians(yaw_deg), self._R_body_cam
+        )
 
         self._pos_var = np.array(
-            self._list_param("position_variance", 3, float), dtype=np.float32)
+            self._list_param("position_variance", 3, float), dtype=np.float32
+        )
         self._ori_var = np.array(
-            self._list_param("orientation_variance", 3, float), dtype=np.float32)
+            self._list_param("orientation_variance", 3, float), dtype=np.float32
+        )
         self._vel_var = np.array(
-            self._list_param("velocity_variance", 3, float), dtype=np.float32)
+            self._list_param("velocity_variance", 3, float), dtype=np.float32
+        )
 
     def _list_param(self, name: str, expected_len: int, item_type):
         value = list(self.get_parameter(name).value)
         if len(value) != expected_len:
             self.get_logger().warn(
-                f"{name} must have {expected_len} elements; using zeros")
+                f"{name} must have {expected_len} elements; using zeros"
+            )
             return [item_type(0.0)] * expected_len
         return [item_type(v) for v in value]
 
@@ -338,7 +377,8 @@ class CuVslamPublisherNode(Node):
         if preset is None:
             self.get_logger().warn(
                 f"Unknown camera_mounting '{mounting}'; expected one of "
-                f"{sorted(presets)}. Falling back to 'forward'.")
+                f"{sorted(presets)}. Falling back to 'forward'."
+            )
             preset = frames.R_BODY_FROM_CAM_OPTICAL
         else:
             self.get_logger().info(f"Using '{mounting}' camera mounting")
@@ -388,8 +428,10 @@ class CuVslamPublisherNode(Node):
 
                     total = n_stereo + n_rgb
                     if total > 0 and total % 300 == 0:
-                        print(f"[cuvslam] counts: stereo={n_stereo} rgb={n_rgb}",
-                              flush=True)
+                        print(
+                            f"[cuvslam] counts: stereo={n_stereo} rgb={n_rgb}",
+                            flush=True,
+                        )
 
                     time.sleep(0.001)
         except Exception as exc:
@@ -405,10 +447,12 @@ class CuVslamPublisherNode(Node):
     def _create_stereo_cameras(self, pipeline):
         print("[cuvslam] creating CAM_B (left mono)", flush=True)
         left = pipeline.create(dai.node.Camera).build(
-            dai.CameraBoardSocket.CAM_B, sensorFps=self._camera_fps)
+            dai.CameraBoardSocket.CAM_B, sensorFps=self._camera_fps
+        )
         print("[cuvslam] creating CAM_C (right mono)", flush=True)
         right = pipeline.create(dai.node.Camera).build(
-            dai.CameraBoardSocket.CAM_C, sensorFps=self._camera_fps)
+            dai.CameraBoardSocket.CAM_C, sensorFps=self._camera_fps
+        )
         return left, right
 
     def _create_stereo_sync_queue(self, pipeline, left, right):
@@ -416,10 +460,12 @@ class CuVslamPublisherNode(Node):
         sync.setSyncThreshold(self._sync_threshold)
 
         print("[cuvslam] linking left/right mono cameras to Sync", flush=True)
-        left.requestOutput((self._width, self._height), type=dai.ImgFrame.Type.GRAY8).link(
-            sync.inputs["left"])
-        right.requestOutput((self._width, self._height), type=dai.ImgFrame.Type.GRAY8).link(
-            sync.inputs["right"])
+        left.requestOutput(
+            (self._width, self._height), type=dai.ImgFrame.Type.GRAY8
+        ).link(sync.inputs["left"])
+        right.requestOutput(
+            (self._width, self._height), type=dai.ImgFrame.Type.GRAY8
+        ).link(sync.inputs["right"])
 
         return sync.out.createOutputQueue(maxSize=4, blocking=False)
 
@@ -429,9 +475,11 @@ class CuVslamPublisherNode(Node):
 
         print(f"[cuvslam] creating CAM_A (color) at {self._rgb_fps}fps", flush=True)
         color = pipeline.create(dai.node.Camera).build(
-            dai.CameraBoardSocket.CAM_A, sensorFps=self._rgb_fps)
+            dai.CameraBoardSocket.CAM_A, sensorFps=self._rgb_fps
+        )
         return color.requestOutput((self._width, self._height)).createOutputQueue(
-            maxSize=4, blocking=False)
+            maxSize=4, blocking=False
+        )
 
     def _create_imu_queue(self, pipeline):
         if not (self._publish_imu or self._enable_imu_fusion):
@@ -492,7 +540,8 @@ class CuVslamPublisherNode(Node):
 
     def _create_vslam_camera(self, calibration, camera_socket, rig_socket, border_mask):
         intrinsics = calibration.getCameraIntrinsics(
-            camera_socket, self._width, self._height)
+            camera_socket, self._width, self._height
+        )
         distortion = list(calibration.getDistortionCoefficients(camera_socket))[:8]
         if len(distortion) < 8:
             distortion += [0.0] * (8 - len(distortion))
@@ -503,9 +552,12 @@ class CuVslamPublisherNode(Node):
 
         camera = vslam.Camera()
         camera.distortion = vslam.Distortion(
-            vslam.Distortion.Model.Polynomial, distortion)
+            vslam.Distortion.Model.Polynomial, distortion
+        )
         camera.focal = np.array([intrinsics[0][0], intrinsics[1][1]], dtype=np.float64)
-        camera.principal = np.array([intrinsics[0][2], intrinsics[1][2]], dtype=np.float64)
+        camera.principal = np.array(
+            [intrinsics[0][2], intrinsics[1][2]], dtype=np.float64
+        )
         camera.size = np.array([self._width, self._height], dtype=np.int64)
         camera.rig_from_camera = self._pose_from_depthai_extrinsics(extrinsics)
         camera.border_top = border_mask[0]
@@ -517,23 +569,23 @@ class CuVslamPublisherNode(Node):
     def _create_vslam_imu(self):
         imu = vslam.ImuCalibration()
         imu.gyroscope_noise_density = float(
-            self.get_parameter("imu_gyro_noise_density").value)
+            self.get_parameter("imu_gyro_noise_density").value
+        )
         imu.gyroscope_random_walk = float(
-            self.get_parameter("imu_gyro_random_walk").value)
+            self.get_parameter("imu_gyro_random_walk").value
+        )
         imu.accelerometer_noise_density = float(
-            self.get_parameter("imu_accel_noise_density").value)
+            self.get_parameter("imu_accel_noise_density").value
+        )
         imu.accelerometer_random_walk = float(
-            self.get_parameter("imu_accel_random_walk").value)
+            self.get_parameter("imu_accel_random_walk").value
+        )
         imu.frequency = float(self.get_parameter("imu_frequency_hz").value)
+        # vslam.Pose takes plain float sequences; _list_param already returns
+        # list[float], so pass it through directly.
         imu.rig_from_imu = vslam.Pose(
-            rotation=np.array(
-                self._list_param("rig_from_imu_rotation_xyzw", 4, float),
-                dtype=np.float64,
-            ),
-            translation=np.array(
-                self._list_param("rig_from_imu_translation", 3, float),
-                dtype=np.float64,
-            ),
+            rotation=self._list_param("rig_from_imu_rotation_xyzw", 4, float),
+            translation=self._list_param("rig_from_imu_translation", 3, float),
         )
         return imu
 
@@ -541,17 +593,20 @@ class CuVslamPublisherNode(Node):
         rotation = extrinsics[:3, :3]
         translation_m = extrinsics[:3, 3] * 0.01
         return vslam.Pose(
-            rotation=frames.rot_to_quat_xyzw(rotation),
-            translation=translation_m,
+            rotation=frames.rot_to_quat_xyzw(rotation).tolist(),
+            translation=translation_m.tolist(),
         )
 
     def _camera_info_from_calibration(self, calibration):
         self._left_camera_info = self._make_camera_info(
-            calibration, dai.CameraBoardSocket.CAM_B, self._left_frame_id)
+            calibration, dai.CameraBoardSocket.CAM_B, self._left_frame_id
+        )
         self._right_camera_info = self._make_camera_info(
-            calibration, dai.CameraBoardSocket.CAM_C, self._right_frame_id)
+            calibration, dai.CameraBoardSocket.CAM_C, self._right_frame_id
+        )
         self._rgb_camera_info = self._make_camera_info(
-            calibration, dai.CameraBoardSocket.CAM_A, self._rig_frame_id)
+            calibration, dai.CameraBoardSocket.CAM_A, self._rig_frame_id
+        )
 
     def _make_camera_info(self, calibration, camera_socket, frame_id):
         msg = CameraInfo()
@@ -560,31 +615,52 @@ class CuVslamPublisherNode(Node):
         msg.header.frame_id = frame_id
         try:
             intrinsics = calibration.getCameraIntrinsics(
-                camera_socket, self._width, self._height)
+                camera_socket, self._width, self._height
+            )
             distortion = list(calibration.getDistortionCoefficients(camera_socket))
-            msg.distortion_model = "rational_polynomial" if len(distortion) > 5 else "plumb_bob"
+            msg.distortion_model = (
+                "rational_polynomial" if len(distortion) > 5 else "plumb_bob"
+            )
             msg.d = distortion
             msg.k = [
-                intrinsics[0][0], intrinsics[0][1], intrinsics[0][2],
-                intrinsics[1][0], intrinsics[1][1], intrinsics[1][2],
-                intrinsics[2][0], intrinsics[2][1], intrinsics[2][2],
+                intrinsics[0][0],
+                intrinsics[0][1],
+                intrinsics[0][2],
+                intrinsics[1][0],
+                intrinsics[1][1],
+                intrinsics[1][2],
+                intrinsics[2][0],
+                intrinsics[2][1],
+                intrinsics[2][2],
             ]
             msg.r = [1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0]
             msg.p = [
-                intrinsics[0][0], intrinsics[0][1], intrinsics[0][2], 0.0,
-                intrinsics[1][0], intrinsics[1][1], intrinsics[1][2], 0.0,
-                intrinsics[2][0], intrinsics[2][1], intrinsics[2][2], 0.0,
+                intrinsics[0][0],
+                intrinsics[0][1],
+                intrinsics[0][2],
+                0.0,
+                intrinsics[1][0],
+                intrinsics[1][1],
+                intrinsics[1][2],
+                0.0,
+                intrinsics[2][0],
+                intrinsics[2][1],
+                intrinsics[2][2],
+                0.0,
             ]
         except Exception as exc:
             self.get_logger().warn(
-                f"Could not read camera calibration for {frame_id}: {exc}")
+                f"Could not read camera calibration for {frame_id}: {exc}"
+            )
         return msg
 
     def _warmup(self, sync_q):
         if self._warmup_frames <= 0:
             return
 
-        print(f"[cuvslam] dropping {self._warmup_frames} warmup stereo frames", flush=True)
+        print(
+            f"[cuvslam] dropping {self._warmup_frames} warmup stereo frames", flush=True
+        )
         dropped = 0
         while dropped < self._warmup_frames and not self._stop.is_set():
             frame = sync_q.tryGet()
@@ -598,10 +674,13 @@ class CuVslamPublisherNode(Node):
         right_frame = message_group["right"]
         timestamp_ns = self._timestamp_to_ns(message_group)
 
-        if (self._last_cuvslam_timestamp_ns is not None
-                and timestamp_ns <= self._last_cuvslam_timestamp_ns):
+        if (
+            self._last_cuvslam_timestamp_ns is not None
+            and timestamp_ns <= self._last_cuvslam_timestamp_ns
+        ):
             self.get_logger().warn(
-                "Dropping non-monotonic stereo frame timestamp from DepthAI")
+                "Dropping non-monotonic stereo frame timestamp from DepthAI"
+            )
             return
 
         self._register_imu_until(tracker, timestamp_ns)
@@ -669,7 +748,8 @@ class CuVslamPublisherNode(Node):
 
         if self._last_cuvslam_timestamp_ns is None:
             self._pending_imu = [
-                sample for sample in self._pending_imu
+                sample
+                for sample in self._pending_imu
                 if sample.timestamp_ns > image_timestamp_ns
             ]
             return
@@ -684,14 +764,16 @@ class CuVslamPublisherNode(Node):
             try:
                 measurement = vslam.ImuMeasurement()
                 measurement.timestamp_ns = sample.timestamp_ns
-                measurement.linear_accelerations = sample.linear_acceleration
-                measurement.angular_velocities = sample.angular_velocity
+                measurement.linear_accelerations = sample.linear_acceleration.tolist()
+                measurement.angular_velocities = sample.angular_velocity.tolist()
                 tracker.register_imu_measurement(0, measurement)
             except Exception as exc:
                 self.get_logger().warn(f"Failed to register cuVSLAM IMU sample: {exc}")
         self._pending_imu = keep
 
     def _publish_imu_sample(self, sample: ImuSample):
+        if self.imu_publisher is None:
+            return
         msg = Imu()
         msg.header.stamp = self._now()
         msg.header.frame_id = self._imu_frame_id
@@ -738,7 +820,9 @@ class CuVslamPublisherNode(Node):
         self.tf_broadcaster.sendTransform(tf_msg)
 
         if self.px4_publisher is not None:
-            self._publish_px4(translation, rotation, sample_timestamp_ns, now.nanoseconds)
+            self._publish_px4(
+                translation, rotation, sample_timestamp_ns, now.nanoseconds
+            )
 
     def _publish_px4(
         self,
@@ -747,6 +831,8 @@ class CuVslamPublisherNode(Node):
         sample_timestamp_ns: int,
         ros_timestamp_ns: int,
     ):
+        if self.px4_publisher is None:
+            return
         R_world_rig = frames.quat_to_rot(
             q_world_rig_xyzw[0],
             q_world_rig_xyzw[1],
@@ -761,7 +847,10 @@ class CuVslamPublisherNode(Node):
             self._R_ned_world,
         )
 
-        if self._last_px4_position_ned is not None and self._last_px4_timestamp_ns is not None:
+        if (
+            self._last_px4_position_ned is not None
+            and self._last_px4_timestamp_ns is not None
+        ):
             dt = (sample_timestamp_ns - self._last_px4_timestamp_ns) * 1e-9
             if dt > 1e-4:
                 v_ned = (p_ned_body - self._last_px4_position_ned) / dt
@@ -822,15 +911,20 @@ class CuVslamPublisherNode(Node):
         except Exception as exc:
             observations = []
             self.get_logger().warn(
-                f"Could not read cuVSLAM observations: {exc}",
-                throttle_duration_sec=5.0)
+                f"Could not read cuVSLAM observations: {exc}", throttle_duration_sec=5.0
+            )
 
         overlay = cv2.cvtColor(left_frame.getCvFrame(), cv2.COLOR_GRAY2BGR)
         for obs in observations:
             center = (int(round(obs.u)), int(round(obs.v)))
             cv2.circle(
-                overlay, center, self._feature_point_radius,
-                self._feature_color(obs.id), thickness=-1, lineType=cv2.LINE_AA)
+                overlay,
+                center,
+                self._feature_point_radius,
+                self._feature_color(obs.id),
+                thickness=-1,
+                lineType=cv2.LINE_AA,
+            )
 
         stamp = self._now()
         msg = self.bridge.cv2_to_imgmsg(overlay, encoding="bgr8")
@@ -838,13 +932,15 @@ class CuVslamPublisherNode(Node):
         msg.header.frame_id = self._left_frame_id
         self.features_image_publisher.publish(msg)
 
-        if (self._left_camera_info is not None
-                and self.features_camera_info_publisher is not None):
+        if (
+            self._left_camera_info is not None
+            and self.features_camera_info_publisher is not None
+        ):
             self._left_camera_info.header = msg.header
             self.features_camera_info_publisher.publish(self._left_camera_info)
 
     def _publish_stereo_debug_images(self, left_frame, right_frame):
-        if not self._publish_stereo_images:
+        if self.left_image_publisher is None or self.right_image_publisher is None:
             return
 
         stamp = self._now()
@@ -853,25 +949,37 @@ class CuVslamPublisherNode(Node):
         left_msg.header.frame_id = self._left_frame_id
         self.left_image_publisher.publish(left_msg)
 
-        right_msg = self.bridge.cv2_to_imgmsg(right_frame.getCvFrame(), encoding="mono8")
+        right_msg = self.bridge.cv2_to_imgmsg(
+            right_frame.getCvFrame(), encoding="mono8"
+        )
         right_msg.header.stamp = stamp
         right_msg.header.frame_id = self._right_frame_id
         self.right_image_publisher.publish(right_msg)
 
-        if self._left_camera_info is not None:
+        if (
+            self._left_camera_info is not None
+            and self.left_camera_info_publisher is not None
+        ):
             self._left_camera_info.header = left_msg.header
             self.left_camera_info_publisher.publish(self._left_camera_info)
-        if self._right_camera_info is not None:
+        if (
+            self._right_camera_info is not None
+            and self.right_camera_info_publisher is not None
+        ):
             self._right_camera_info.header = right_msg.header
             self.right_camera_info_publisher.publish(self._right_camera_info)
 
     _logged_rgb_shape = False
 
     def _publish_rgb_frame(self, frame):
+        if self.rgb_publisher is None:
+            return
         cv_img = frame.getCvFrame()
         if not CuVslamPublisherNode._logged_rgb_shape:
-            print(f"[cuvslam] rgb cv_img shape={cv_img.shape} dtype={cv_img.dtype}",
-                  flush=True)
+            print(
+                f"[cuvslam] rgb cv_img shape={cv_img.shape} dtype={cv_img.dtype}",
+                flush=True,
+            )
             CuVslamPublisherNode._logged_rgb_shape = True
 
         msg = self.bridge.cv2_to_imgmsg(cv_img, encoding="bgr8")
@@ -879,7 +987,10 @@ class CuVslamPublisherNode(Node):
         msg.header.frame_id = self._rig_frame_id
         self.rgb_publisher.publish(msg)
 
-        if self._rgb_camera_info is not None:
+        if (
+            self._rgb_camera_info is not None
+            and self.rgb_camera_info_publisher is not None
+        ):
             self._rgb_camera_info.header = msg.header
             self.rgb_camera_info_publisher.publish(self._rgb_camera_info)
 
@@ -908,7 +1019,8 @@ class CuVslamPublisherNode(Node):
             self._worker.join(timeout=10.0)
             if self._worker.is_alive():
                 self.get_logger().warn(
-                    "DepthAI worker did not stop within 10s; shutting down anyway")
+                    "DepthAI worker did not stop within 10s; shutting down anyway"
+                )
         super().destroy_node()
 
 

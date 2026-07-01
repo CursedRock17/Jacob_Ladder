@@ -44,3 +44,58 @@ nvidia-cudss-cu12 = { url = "https://files.pythonhosted.org/packages/94/81/5db4f
 name = "nvidia-cudss-cu12"
 version = "0.7.1.4"
 requires-dist = []
+
+# ---------------------------------------------------------------------------
+# Linting / formatting / type checking
+#
+# Only first-party workspace code is checked. Git submodules and vendored
+# message packages are excluded so their upstream code is never reformatted or
+# flagged. build/, install/ and log/ are already covered by .gitignore, which
+# both tools respect by default.
+# ---------------------------------------------------------------------------
+
+[tool.ruff]
+# The workspace targets CPython 3.10 (see requires-python and .python-version).
+target-version = "py310"
+# Git submodules and vendored message packages are upstream code we must never
+# reformat or lint. force-exclude makes ruff honor these excludes even when a
+# path inside them is passed explicitly (e.g. by a pre-commit hook), not just
+# during directory traversal.
+force-exclude = true
+extend-exclude = [
+    "src/vision_opencv",
+    "src/px4-ros2-interface-lib",
+    "src/px4_msgs",
+    "src/px4_msgs_old",
+    "src/Micro-XRCE-DDS-Agent",
+]
+
+[tool.ruff.lint.per-file-ignores]
+# ROS 2 launch files stage optional nodes/config as commented-out
+# LaunchDescription entries (e.g. "# ros2bag_node,"), leaving their builder
+# variables intentionally assigned-but-unused as ready-to-toggle blocks.
+"**/launch/*.py" = ["F841"]
+
+[tool.ty.environment]
+python-version = "3.10"
+# Resolve first-party packages from the source tree, not the colcon-installed
+# copies that land on PYTHONPATH when the workspace overlay (install/setup.bash)
+# is sourced. Each ROS 2 ament_python package nests its module one level deep
+# (src/<pkg>/<pkg>/), so the search root is the outer directory. Without this,
+# the install/ copies shadow the source and relative imports such as
+# `from . import frames` fail to resolve.
+extra-paths = [
+    "src/oak_d_visual_odometry",
+    "src/drogue_flight",
+    "src/ros2_yolo_image_processing",
+    "packages/jetson_cudss_bootstrap",
+]
+
+[tool.ty.src]
+exclude = [
+    "src/vision_opencv",
+    "src/px4-ros2-interface-lib",
+    "src/px4_msgs",
+    "src/px4_msgs_old",
+    "src/Micro-XRCE-DDS-Agent",
+]

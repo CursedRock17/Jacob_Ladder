@@ -2,6 +2,8 @@
 
 import threading
 import time
+from typing import cast
+
 import depthai as dai
 
 from cv_bridge import CvBridge
@@ -18,7 +20,8 @@ class RGBPublisherNode(Node):
         super().__init__("rgb_publisher_node")
 
         self.image_publisher = self.create_publisher(
-            Image, "/rgb/image", PUBLISHER_QUEUE_SIZE)
+            Image, "/rgb/image", PUBLISHER_QUEUE_SIZE
+        )
 
         self.bridge = CvBridge()
 
@@ -38,11 +41,13 @@ class RGBPublisherNode(Node):
 
                 print("[rgb_publisher] creating CAM_A (color)", flush=True)
                 color = p.create(dai.node.Camera).build(
-                    dai.CameraBoardSocket.CAM_A, sensorFps=fps)
+                    dai.CameraBoardSocket.CAM_A, sensorFps=fps
+                )
 
                 print("[rgb_publisher] requesting CAM_A output queue", flush=True)
                 rgb_q = color.requestOutput((width, height)).createOutputQueue(
-                    maxSize=4, blocking=False)
+                    maxSize=4, blocking=False
+                )
 
                 print("[rgb_publisher] calling p.start()", flush=True)
                 p.start()
@@ -52,10 +57,16 @@ class RGBPublisherNode(Node):
                 while p.isRunning() and not self._stop.is_set():
                     frame = rgb_q.tryGet()
                     if frame is not None:
+                        # tryGet() is typed as the ADatatype base; at runtime a
+                        # color output queue yields ImgFrame.
+                        frame = cast(dai.ImgFrame, frame)
                         if n_rgb == 0:
-                            print(f"[rgb_publisher] first frame: "
-                                  f"w={frame.getWidth()} h={frame.getHeight()} "
-                                  f"fmt={frame.getType()}", flush=True)
+                            print(
+                                f"[rgb_publisher] first frame: "
+                                f"w={frame.getWidth()} h={frame.getHeight()} "
+                                f"fmt={frame.getType()}",
+                                flush=True,
+                            )
                         self._publish_image(frame)
                         n_rgb += 1
                     time.sleep(0.001)
@@ -68,8 +79,10 @@ class RGBPublisherNode(Node):
     def _publish_image(self, frame):
         cv_img = frame.getCvFrame()
         if not RGBPublisherNode._logged_image_shape:
-            print(f"[rgb_publisher] cv_img shape={cv_img.shape} dtype={cv_img.dtype}",
-                  flush=True)
+            print(
+                f"[rgb_publisher] cv_img shape={cv_img.shape} dtype={cv_img.dtype}",
+                flush=True,
+            )
             RGBPublisherNode._logged_image_shape = True
         msg = self.bridge.cv2_to_imgmsg(cv_img, encoding="bgr8")
         msg.header.stamp = self.get_clock().now().to_msg()
@@ -95,5 +108,5 @@ def main(args=None):
         rclpy.shutdown()
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()

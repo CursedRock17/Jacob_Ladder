@@ -18,42 +18,49 @@ def generate_launch_description():
     # Include the MPA To ROS 2 connection launch file.
     mpa_to_ros2 = IncludeLaunchDescription(
         XMLLaunchDescriptionSource(
-            os.path.join(mpa_ros2_bridge, "launch", "voxl_map_to_ros2.launch"))
+            os.path.join(mpa_ros2_bridge, "launch", "voxl_map_to_ros2.launch")
+        )
     )
 
     # ROS 2 Node that runs the autonomous landing code
     drogue_flight_agro = Node(
-        package='drogue_flight',
-        executable='drogue_flight_agro',
+        package="drogue_flight",
+        executable="drogue_flight_agro",
         name="drogue_flight_auto",
-        output='screen',
+        output="screen",
     )
 
     # ROS 2 Node that runs the ranging algorithm to the drogue/coupler
     drogue_ranging = Node(
-        package='drogue_flight',
-        executable='drogue_range_ros_node',
+        package="drogue_flight",
+        executable="drogue_range_ros_node",
         name="drogue_ranging",
-        output='screen',
+        output="screen",
     )
 
     drogue_share = get_package_share_directory("drogue_flight")
-    qos_overrides = os.path.join(drogue_share, 'config', 'rosbag_qos_override.yaml')
-    bag_dir = 'rosbags/' + f"flight_bag_{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}"
+    qos_overrides = os.path.join(drogue_share, "config", "rosbag_qos_override.yaml")
+    bag_dir = "rosbags/" + f"flight_bag_{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}"
     ros2bag_node = ExecuteProcess(
         cmd=[
-            'ros2', 'bag', 'record',
-            '-a',
-            '-o', bag_dir,
-            '--qos-profile-overrides-path', qos_overrides
+            "ros2",
+            "bag",
+            "record",
+            "-a",
+            "-o",
+            bag_dir,
+            "--qos-profile-overrides-path",
+            qos_overrides,
         ],
-        output='log'
+        output="log",
     )
 
     # Add in all our separate commands into one general launch command
-    return LaunchDescription([
-        #mpa_to_ros2,
-        #drogue_flight_agro,
-        drogue_ranging,
-        #ros2bag_node,
-    ])
+    return LaunchDescription(
+        [
+            # mpa_to_ros2,
+            # drogue_flight_agro,
+            drogue_ranging,
+            # ros2bag_node,
+        ]
+    )

@@ -5,9 +5,10 @@ Created on Wed Jan 21 11:53:52 2026
 @author: rllow
 """
 
-import os
 import time
 import threading
+from typing import Any
+
 import cv2
 import numpy as np
 from ultralytics import YOLO
@@ -44,15 +45,19 @@ SHOW = False
 # =========================
 # UDP SETTINGS
 # =========================
-UDP_IP = "127.0.0.1"     # if ROS2 node is on same device, keep localhost
+UDP_IP = "127.0.0.1"  # if ROS2 node is on same device, keep localhost
 UDP_PORT = 5005
-UDP_SEND_HZ = 30         # cap send rate (prevents spamming if inference spikes)
-UDP_SEND_ONLY_IF_VALID = False  # set True if you only want packets when detections exist
+UDP_SEND_HZ = 30  # cap send rate (prevents spamming if inference spikes)
+UDP_SEND_ONLY_IF_VALID = (
+    False  # set True if you only want packets when detections exist
+)
 
 # =========================
 # LATEST-FRAME BUFFER
 # =========================
-LATEST = {"frame": None, "ts": 0.0, "seq": 0}
+# Holds heterogeneous values (BGR frame ndarray, float timestamp, int seq)
+# shared between the reader thread and the consumer loop.
+LATEST: dict[str, Any] = {"frame": None, "ts": 0.0, "seq": 0}
 LOCK = threading.Lock()
 STOP = False
 
@@ -63,9 +68,9 @@ def open_capture_rtsp(url: str) -> cv2.VideoCapture:
         return cap
 
     gst = (
-        f'rtspsrc location={url} latency=0 drop-on-late=true ! '
-        'rtph264depay ! h264parse ! avdec_h264 ! '
-        'videoconvert ! appsink drop=true sync=false max-buffers=1'
+        f"rtspsrc location={url} latency=0 drop-on-late=true ! "
+        "rtph264depay ! h264parse ! avdec_h264 ! "
+        "videoconvert ! appsink drop=true sync=false max-buffers=1"
     )
     return cv2.VideoCapture(gst, cv2.CAP_GSTREAMER)
 
@@ -149,7 +154,12 @@ def RangingFunction(x1c, y1c, x2c, y2c, n, frame_w=FRAME_W, frame_h=FRAME_H):
     CombinedOffset = np.hypot(OffsetDistancex, OffsetDistancey)
     FinalDistance = np.hypot(WeightedDistance, CombinedOffset)
 
-    return [float(OffsetDistancex)* 0.0254, float(OffsetDistancey)* 0.0254, float(WeightedDistance)* 0.0254, float(FinalDistance)* 0.0254]
+    return [
+        float(OffsetDistancex) * 0.0254,
+        float(OffsetDistancey) * 0.0254,
+        float(WeightedDistance) * 0.0254,
+        float(FinalDistance) * 0.0254,
+    ]
 
 
 def apply_pc_and_norm(rng4, pc=PC):
@@ -175,8 +185,9 @@ def pick_best_by_class(xyxy, confs, clss, class_id):
 def draw_box(img, x1, y1, x2, y2, text, color, thickness=2):
     x1i, y1i, x2i, y2i = int(x1), int(y1), int(x2), int(y2)
     cv2.rectangle(img, (x1i, y1i), (x2i, y2i), color, thickness)
-    cv2.putText(img, text, (x1i, max(0, y1i - 6)),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.55, color, 2)
+    cv2.putText(
+        img, text, (x1i, max(0, y1i - 6)), cv2.FONT_HERSHEY_SIMPLEX, 0.55, color, 2
+    )
 
 
 # =========================
@@ -231,12 +242,7 @@ def main():
         h, w = frame.shape[:2]
 
         results = model.predict(
-            source=frame,
-            imgsz=IMGSZ,
-            conf=CONF,
-            iou=IOU,
-            device=DEVICE,
-            verbose=False
+            source=frame, imgsz=IMGSZ, conf=CONF, iou=IOU, device=DEVICE, verbose=False
         )
 
         r = results[0]
@@ -251,9 +257,11 @@ def main():
         have_drogue = False
 
         if boxes is not None and len(boxes) > 0:
-            xyxy = boxes.xyxy.detach().cpu().numpy()
-            confs = boxes.conf.detach().cpu().numpy()
-            clss = boxes.cls.detach().cpu().numpy().astype(int)
+            # ultralytics types these as Tensor | ndarray; at runtime they are
+            # torch Tensors, so .detach() is valid.
+            xyxy = boxes.xyxy.detach().cpu().numpy()  # ty: ignore[unresolved-attribute]
+            confs = boxes.conf.detach().cpu().numpy()  # ty: ignore[unresolved-attribute]
+            clss = boxes.cls.detach().cpu().numpy().astype(int)  # ty: ignore[unresolved-attribute]
 
             coupler = pick_best_by_class(xyxy, confs, clss, CLASS_COUPLER)
             drogue = pick_best_by_class(xyxy, confs, clss, CLASS_DROGUE)
@@ -262,14 +270,18 @@ def main():
                 x1c, y1c, x2c, y2c, cc = coupler
                 coupler_conf = float(cc)
                 have_coupler = True
-                coupler_out = RangingFunction(x1c, y1c, x2c, y2c, n=1, frame_w=w, frame_h=h)
+                coupler_out = RangingFunction(
+                    x1c, y1c, x2c, y2c, n=1, frame_w=w, frame_h=h
+                )
                 coupler_out = apply_pc_and_norm(coupler_out, PC)
 
             if drogue is not None:
                 x1d, y1d, x2d, y2d, dc = drogue
                 drogue_conf = float(dc)
                 have_drogue = True
-                drogue_out = RangingFunction(x1d, y1d, x2d, y2d, n=2, frame_w=w, frame_h=h)
+                drogue_out = RangingFunction(
+                    x1d, y1d, x2d, y2d, n=2, frame_w=w, frame_h=h
+                )
                 drogue_out = apply_pc_and_norm(drogue_out, PC)
 
         snapshot_out = coupler_out + drogue_out
@@ -281,9 +293,9 @@ def main():
         if (not UDP_SEND_ONLY_IF_VALID) or valid:
             if (now - t_last_send) >= send_period:
                 pkt = {
-                    "ts": now,          # sender wall time
-                    "frame_ts": ts,     # capture time
-                    "seq": int(seq),    # frame sequence from reader
+                    "ts": now,  # sender wall time
+                    "frame_ts": ts,  # capture time
+                    "seq": int(seq),  # frame sequence from reader
                     "valid": valid,
                     "w": int(w),
                     "h": int(h),
@@ -316,8 +328,9 @@ def main():
         frame_idx += 1
 
         if frame_idx % 30 == 0:
-            fps = 30.0 / max(1e-6, (time.time() - t_last))
-            lag_s = time.time() - ts
+            # fps / lag_s feed the optional debug print below; kept staged.
+            fps = 30.0 / max(1e-6, (time.time() - t_last))  # noqa: F841
+            lag_s = time.time() - ts  # noqa: F841
             # print(f"[INFO] infer FPS: {fps:.2f} | frame age: {lag_s:.3f}s")
             t_last = time.time()
 
