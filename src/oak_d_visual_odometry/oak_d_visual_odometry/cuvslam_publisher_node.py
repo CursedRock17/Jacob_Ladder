@@ -31,7 +31,9 @@ from sensor_msgs.msg import CameraInfo, Image, Imu
 from tf2_ros import TransformBroadcaster
 
 import rclpy
+from rclpy.exceptions import ParameterUninitializedException
 from rclpy.node import Node
+from rclpy.parameter import Parameter
 from rclpy.qos import DurabilityPolicy, HistoryPolicy, QoSProfile, ReliabilityPolicy
 
 from . import frames
@@ -189,7 +191,7 @@ class CuVslamPublisherNode(Node):
 
         self.declare_parameter("init_yaw_offset_deg", 0.0)
         self.declare_parameter("t_body_cam", [0.0, 0.0, 0.0])
-        self.declare_parameter("R_body_cam_override", [])
+        self.declare_parameter("R_body_cam_override", Parameter.Type.DOUBLE_ARRAY)
         self.declare_parameter("position_variance", [0.01, 0.01, 0.02])
         self.declare_parameter("orientation_variance", [0.01, 0.01, 0.02])
         self.declare_parameter("velocity_variance", [0.1, 0.1, 0.1])
@@ -231,8 +233,8 @@ class CuVslamPublisherNode(Node):
             self.get_parameter("enable_observations_export").value)
         self._verbosity = int(self.get_parameter("verbosity").value)
 
-        self._left_border_mask = self._list_param("left_border_mask", 4, float)
-        self._right_border_mask = self._list_param("right_border_mask", 4, float)
+        self._left_border_mask = self._list_param("left_border_mask", 4, int)
+        self._right_border_mask = self._list_param("right_border_mask", 4, int)
 
         self._world_frame_id = str(self.get_parameter("world_frame_id").value)
         self._rig_frame_id = str(self.get_parameter("rig_frame_id").value)
@@ -257,7 +259,10 @@ class CuVslamPublisherNode(Node):
         self._R_ned_world = frames.r_ned_from_cuvslam_world(math.radians(yaw_deg))
 
         self._t_body_cam = np.array(self._list_param("t_body_cam", 3, float), dtype=np.float64)
-        override = list(self.get_parameter("R_body_cam_override").value)
+        try:
+            override = list(self.get_parameter("R_body_cam_override").value)
+        except ParameterUninitializedException:
+            override = []
         if len(override) == 9:
             self._R_body_cam = np.array(override, dtype=np.float64).reshape(3, 3)
         else:

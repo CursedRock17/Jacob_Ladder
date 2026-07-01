@@ -11,24 +11,38 @@
 # Modified from this script: https://github.com/AastaNV/JEP/blob/master/script/install_opencv4.6.0_Jetson.sh
 # Do not use U.S. mirror as your APT source, it has missing files.
 
-version="4.10.0"
-folder="$HOME/opencv_src"
+version="${OPENCV_VERSION:-4.10.0}"
+folder="${OPENCV_SRC_DIR:-$HOME/opencv_src}"
+install_prefix="${OPENCV_INSTALL_PREFIX:-/usr/local}"
+default_build_jobs="$(($(nproc) - 1))"
+if [ "${default_build_jobs}" -lt 1 ]; then
+    default_build_jobs=1
+fi
+build_jobs="${OPENCV_BUILD_JOBS:-${default_build_jobs}}"
+remove_default_opencv="${REMOVE_DEFAULT_OPENCV:-ask}"
 
 set -e
 
-for (( ; ; ))
-do
-    echo "Do you want to remove the default OpenCV (yes/no)?"
-    read rm_old
+if [ "${remove_default_opencv}" = "ask" ]; then
+    for (( ; ; ))
+    do
+        echo "Do you want to remove the default OpenCV (yes/no)?"
+        read rm_old
 
-    if [ "$rm_old" = "yes" ]; then
+        if [ "$rm_old" = "yes" ]; then
+            remove_default_opencv="yes"
+            break
+        elif [ "$rm_old" = "no" ]; then
+            remove_default_opencv="no"
+            break
+        fi
+    done
+fi
+
+if [ "${remove_default_opencv}" = "yes" ]; then
         echo "** Remove other OpenCV first"
         sudo apt -y purge *libopencv*
-	break
-    elif [ "$rm_old" = "no" ]; then
-	break
-    fi
-done
+fi
 
 
 echo "------------------------------------"
@@ -45,31 +59,42 @@ sudo apt-get install -y curl
 echo "------------------------------------"
 echo "** Download opencv "${version}" (2/4)"
 echo "------------------------------------"
-mkdir $folder
-cd ${folder}
-curl -L https://github.com/opencv/opencv/archive/${version}.zip -o opencv-${version}.zip
-curl -L https://github.com/opencv/opencv_contrib/archive/${version}.zip -o opencv_contrib-${version}.zip
-unzip opencv-${version}.zip
-unzip opencv_contrib-${version}.zip
-rm opencv-${version}.zip opencv_contrib-${version}.zip
-cd opencv-${version}/
+mkdir -p "$folder"
+cd "${folder}"
+if [ ! -d "opencv-${version}" ]; then
+    curl -fL https://github.com/opencv/opencv/archive/${version}.zip -o opencv-${version}.zip
+    unzip -q opencv-${version}.zip
+    rm opencv-${version}.zip
+fi
+if [ ! -d "opencv_contrib-${version}" ]; then
+    curl -fL https://github.com/opencv/opencv_contrib/archive/${version}.zip -o opencv_contrib-${version}.zip
+    unzip -q opencv_contrib-${version}.zip
+    rm opencv_contrib-${version}.zip
+fi
+cd "opencv-${version}/"
 
 
 echo "------------------------------------"
 echo "** Build opencv "${version}" (3/4)"
 echo "------------------------------------"
-mkdir release
+mkdir -p release
 cd release/
 # CUDA_ARCH_BIN 8.7 is AGX orin
-cmake -D WITH_CUDA=ON -D WITH_CUDNN=ON -D CUDA_ARCH_BIN="7.2,8.7" -D CUDA_ARCH_PTX="" -D OPENCV_GENERATE_PKGCONFIG=ON -D OPENCV_EXTRA_MODULES_PATH=../../opencv_contrib-${version}/modules -D WITH_GSTREAMER=ON -D WITH_LIBV4L=ON -D BUILD_opencv_python3=ON -D BUILD_TESTS=OFF -D BUILD_PERF_TESTS=OFF -D BUILD_EXAMPLES=OFF -D CMAKE_BUILD_TYPE=RELEASE -D CMAKE_INSTALL_PREFIX=/usr/local ..
+cmake -D WITH_CUDA=ON -D WITH_CUDNN=ON -D CUDA_ARCH_BIN="7.2,8.7" -D CUDA_ARCH_PTX="" -D OPENCV_GENERATE_PKGCONFIG=ON -D OPENCV_EXTRA_MODULES_PATH=../../opencv_contrib-${version}/modules -D WITH_GSTREAMER=ON -D WITH_LIBV4L=ON -D BUILD_opencv_python3=ON -D BUILD_TESTS=OFF -D BUILD_PERF_TESTS=OFF -D BUILD_EXAMPLES=OFF -D CMAKE_BUILD_TYPE=RELEASE -D CMAKE_INSTALL_PREFIX="${install_prefix}" ..
 # save a core
-make -j$(($(nproc) - 1))
+make -j"${build_jobs}"
 
 echo "------------------------------------"
 echo "** Install opencv "${version}" (4/4)"
 echo "------------------------------------"
-sudo make install
-echo 'export LD_LIBRARY_PATH=/usr/local/lib:$LD_LIBRARY_PATH' >> ~/.bashrc
+if [ -w "${install_prefix}" ]; then
+    make install
+else
+    sudo make install
+fi
+if ! grep -q "LD_LIBRARY_PATH=${install_prefix}/lib" ~/.bashrc; then
+    echo "export LD_LIBRARY_PATH=${install_prefix}/lib:\$LD_LIBRARY_PATH" >> ~/.bashrc
+fi
 source ~/.bashrc
 
 

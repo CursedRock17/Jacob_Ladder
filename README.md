@@ -10,6 +10,20 @@ The framework uses PX4 **external modes** instead of the traditional offboard AP
 Within the project you'll find several pacakges, this README serves as a higher level overview of all the components involved in the project.
 For a deeper view, there are embedded markdown files which break down specific rationale, processes, and objectives.
 
+## Python Environment
+
+Use the repo uv environment for Python dependencies. It is created with system
+site packages enabled so ROS 2, `cv_bridge`, JetPack OpenCV, and other system
+Python modules remain visible inside the venv.
+
+```bash
+uv venv --python 3.10 --system-site-packages .venv
+uv sync
+source .venv/bin/activate
+source /opt/ros/humble/setup.bash
+source install/setup.bash  # after colcon build
+```
+
 START HERE:
 
 | Package | Objective |

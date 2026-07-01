@@ -8,13 +8,17 @@ NVIDIA cuVSLAM is the only VSLAM backend in this package.
 
 ## Python Dependencies
 
-`depthai`, `numpy`, `opencv-python`, and NVIDIA's `cuvslam` wheel are not ROS
-packages and will not be installed by `rosdep`.
+`depthai`, `numpy`, and NVIDIA's `cuvslam` wheel are not ROS packages and will
+not be installed by `rosdep`. Use the repo root uv environment; it must be
+created with system site packages enabled so ROS 2 Python modules, `cv_bridge`,
+and JetPack OpenCV remain visible.
 
 The repo root `pyproject.toml` pins the current target PyCuVSLAM wheel:
 
 ```bash
+uv venv --python 3.10 --system-site-packages .venv
 uv sync
+source .venv/bin/activate
 ```
 
 If you are not using `uv`, install the `cuvslam` wheel that matches the target
@@ -25,17 +29,9 @@ generic package requirements:
 pip install -r src/oak_d_visual_odometry/requirements.txt
 ```
 
-For a ROS venv, keep system packages visible so `rclpy` and `cv_bridge` come
-from the ROS installation:
-
-```bash
-python3 -m venv --system-site-packages venv
-source venv/bin/activate
-pip install -r src/oak_d_visual_odometry/requirements.txt
-```
-
-`requirements.txt` pins `numpy<2` because many ROS 2 `cv_bridge` builds are
-compiled against NumPy 1.x.
+`pyproject.toml` pins `numpy<2` because many ROS 2 `cv_bridge` builds are
+compiled against NumPy 1.x. Do not install a separate `opencv-python` wheel for
+this node; use the JetPack/system OpenCV that matches `cv_bridge`.
 
 ## USB Permissions
 
@@ -54,6 +50,12 @@ Unplug and replug the OAK-D after adding the rule.
 ```bash
 colcon build --packages-select oak_d_visual_odometry
 source install/setup.bash
+```
+
+## Launch
+
+```bash
+ros2 launch oak_d_visual_odometry cuvslam_px4.launch.py
 ```
 
 ## Executables
