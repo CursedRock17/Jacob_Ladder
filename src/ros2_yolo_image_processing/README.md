@@ -6,12 +6,13 @@ estimate pose of the camera.
 
 ## Setup
 Use the repo root uv environment; do not create a nested package-local venv.
-The YOLO dependencies live in the root `pyproject.toml` as the `yolo` extra.
+The YOLO dependencies live in the root `pyproject.toml` and are installed by
+default, so a plain `uv sync` is all you need.
 
 ```shell
 cd /path/to/Jacob_Ladder
 uv venv --python 3.10 --system-site-packages .venv
-uv sync --extra yolo
+uv sync
 source .venv/bin/activate
 source /opt/ros/humble/setup.bash
 colcon build --packages-select ros2_yolo_image_processing

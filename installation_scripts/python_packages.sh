@@ -16,9 +16,11 @@
 #   from the system Python, preventing dependency conflicts.
 #
 # PYTORCH / YOLO:
-#   Do not add ultralytics to the default uv sync unless the torch source is
-#   pinned for Jetson. The generic PyPI dependency path can install a mismatched
-#   CUDA/PyTorch/OpenCV stack and conflict with ROS cv_bridge.
+#   torch/torchvision are pinned to the JetPack JP6/CUDA 12.6 wheels in
+#   pyproject.toml (guarded by an aarch64 marker) and are now part of the
+#   default dependencies, so `uv sync` installs the full YOLO stack. The
+#   jetson-cudss-bootstrap package preloads the cuDSS runtime at interpreter
+#   startup, so no LD_LIBRARY_PATH or extra install step is required.
 # =============================================================================
 set -euo pipefail
 

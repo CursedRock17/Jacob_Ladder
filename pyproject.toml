@@ -5,20 +5,42 @@ description = "Jacob Latter Python Workspace"
 readme = "README.md"
 requires-python = ">=3.10, <3.11"
 dependencies = [
+    "catkin-pkg",
     "cuvslam",
     "depthai>=2.22.0.0",
+    "empy==3.3.4",
+    "lark>=1.1.9",
     "numpy>=1.24,<2",
     "rerun-sdk",
     "ruff",
     "scipy",
     "ty",
-]
-
-[project.optional-dependencies]
-yolo = [
+    # YOLO / drogue image-processing stack. Installed by default so a plain
+    # `uv sync` gives you a ready-to-run environment. On JetPack 6.2 / CUDA 12.6
+    # (aarch64) the pinned CUDA torch/torchvision wheels are used, plus
+    # jetson-cudss-bootstrap, which preloads the cuDSS runtime at interpreter
+    # startup so `import torch` works with no LD_LIBRARY_PATH and no extra steps.
     "opencv-python==4.9.0.80",
     "ultralytics",
+    "torch @ https://pypi.jetson-ai-lab.io/jp6/cu126/+f/46b/b8b13f844b211/torch-2.11.0-cp310-cp310-linux_aarch64.whl#sha256=46bb8b13f844b2111f6f41abc703d01075a7185e0c587cb002e957ede2b8c8a3 ; sys_platform == 'linux' and platform_machine == 'aarch64'",
+    "torchvision @ https://pypi.jetson-ai-lab.io/jp6/cu126/+f/d11/6f08d3d62417d/torchvision-0.26.0-cp310-cp310-linux_aarch64.whl#sha256=d116f08d3d62417dc36cbf41923e491b8b49b77399575f0878ae391e6e77a159 ; sys_platform == 'linux' and platform_machine == 'aarch64'",
+    "jetson-cudss-bootstrap ; sys_platform == 'linux' and platform_machine == 'aarch64'",
 ]
+
+[tool.uv.workspace]
+members = ["packages/jetson_cudss_bootstrap"]
 
 [tool.uv.sources]
 cuvslam = { url = "https://github.com/nvidia-isaac/cuVSLAM/releases/download/v16.0.0/cuvslam-16.0.0+cu12-cp310-cp310-manylinux_2_35_aarch64.whl" }
+jetson-cudss-bootstrap = { workspace = true }
+nvidia-cudss-cu12 = { url = "https://files.pythonhosted.org/packages/94/81/5db4fe70e8ae64399012810652c9952908636363db59b84771bf225532af/nvidia_cudss_cu12-0.7.1.4-py3-none-manylinux_2_17_aarch64.whl" }
+
+# The PyPI nvidia-cudss-cu12 wheel unconditionally depends on nvidia-cublas-cu12,
+# which is a generic manylinux build that can outrun the JetPack-provided CUDA
+# driver/runtime. We only need the cuDSS shared libraries themselves (preloaded
+# by jetson-cudss-bootstrap), so strip the transitive dependency the same way
+# `pip install --no-deps` would.
+[[tool.uv.dependency-metadata]]
+name = "nvidia-cudss-cu12"
+version = "0.7.1.4"
+requires-dist = []

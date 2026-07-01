@@ -24,12 +24,21 @@ source /opt/ros/humble/setup.bash
 source install/setup.bash  # after colcon build
 ```
 
-Install the YOLO/drogue image-processing dependencies from the same uv
-environment when needed:
+That's it — `uv sync` installs everything, including the YOLO/drogue
+image-processing stack (`torch`, `torchvision`, `ultralytics`, `opencv-python`).
+There is no extra to enable and no bootstrap script to run.
 
-```bash
-uv sync --extra yolo
-```
+On JetPack 6.2 / CUDA 12.6 (aarch64), `uv sync` pulls the pinned CUDA-enabled
+`torch` and `torchvision` wheels from
+[pypi.jetson-ai-lab.io/jp6/cu126](https://pypi.jetson-ai-lab.io/jp6/cu126)
+plus the `jetson-cudss-bootstrap` workspace package (see
+`packages/jetson_cudss_bootstrap`), which preloads the cuDSS runtime shared
+libraries torch needs at import time. No `LD_LIBRARY_PATH` exports or extra
+install steps are required — `uv sync` (or `uv run ...`) is enough.
+
+The only reason to pass `--system-site-packages` when creating the venv is so
+ROS 2, `cv_bridge`, and JetPack OpenCV stay visible inside it. If you re-create
+the venv, keep that flag.
 
 START HERE:
 

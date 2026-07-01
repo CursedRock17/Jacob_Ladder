@@ -1,0 +1,16 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "jetson-cudss-bootstrap"
+version = "0.1.0"
+description = "Preloads Jetson JP6/CUDA 12.6 cuDSS runtime libraries so torch can dlopen libcudss.so.0 without LD_LIBRARY_PATH"
+requires-python = ">=3.10"
+dependencies = [
+    "nvidia-cudss-cu12 ; sys_platform == 'linux' and platform_machine == 'aarch64'",
+]
+
+[tool.hatch.build.targets.wheel]
+bypass-selection = true
+force-include = { "jetson_cudss_bootstrap.pth" = "jetson_cudss_bootstrap.pth", "_jetson_cudss_bootstrap.py" = "_jetson_cudss_bootstrap.py" }
