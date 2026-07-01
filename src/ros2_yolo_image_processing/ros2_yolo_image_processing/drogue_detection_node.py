@@ -11,6 +11,7 @@ from vision_msgs.msg import VisionInfo, Detection2D, Detection2DArray, ObjectHyp
 import numpy as np
 import cv2
 from cv_bridge import CvBridge
+import torch
 from ultralytics import YOLO
 
 # Your stream/frame size (used by ranging center math)
@@ -35,12 +36,13 @@ class DrogueDetectionNode(Node):
         super().__init__('drogue_detection_node')
 
         # Find our local Pytorch Neural Network, then establish the tensors
-        self.MODEL_FILEPATH = '/home/cursedrock17/Documents/Electrical/Matrix_Lab/jacob_drone_ws/src/Jacob_Ladder/src/drogue_flight/models/best.pt'
+        self.MODEL_FILEPATH = '/home/usmsm/Jacob_Ladder/src/drogue_flight/models/best.pt'
         self.IMGSZ = 416
         self.CONF = 0.25
         self.IOU = 0.45
         # "cpu" for laptop/Pi, "0" for Jetson/CUDA GPU
-        self.DEVICE = self.declare_parameter('device', 'cpu').value
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+        self.DEVICE = self.declare_parameter('device', device).value
 
         # Frame skip flag: if YOLO is still running on a previous frame, drop new ones
         # rather than letting the subscription queue build up
