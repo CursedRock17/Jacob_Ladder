@@ -32,6 +32,9 @@ target_link_libraries(${PROJECT_NAME}_bin ${PROJECT_NAME}_lib)
 target_include_directories(${PROJECT_NAME}_bin PUBLIC src)
 ament_target_dependencies(${PROJECT_NAME}_bin rclcpp px4_msgs px4_msgs_old)
 install(TARGETS
+        ${PROJECT_NAME}_lib
+        DESTINATION lib)
+install(TARGETS
         ${PROJECT_NAME}_bin
         DESTINATION lib/${PROJECT_NAME})
 

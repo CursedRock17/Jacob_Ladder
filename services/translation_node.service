@@ -4,13 +4,13 @@ After=network-online.target
 
 [Service]
 Type=simple
-User=jacob
-Group=jacob
-ExecStart=/bin/bash /etc/systemd/system/run_translation_node.sh
+User=usmsm
+Group=usmsm
+ExecStart=/bin/bash /home/usmsm/Jacob_Ladder/services/run_translation_node.sh
 Restart=on-failure
 RestartSec=5s
-StandardOutput=syslog
-StandardError=syslog
+StandardOutput=journal
+StandardError=journal
 SyslogIdentifier=translation_node_service
 
 [Install]
