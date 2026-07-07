@@ -41,6 +41,22 @@ R_BODY_FROM_CAM_OPTICAL_DOWN = np.array(
     ]
 )
 
+# Down-facing tilted 45 degrees toward the nose (45 degree angle of
+# depression): the lens boresight points midway between body-down and
+# body-forward, with the top of the image toward the front of the drone.
+# This is the down-facing mount rotated 45 degrees about body Y (right):
+#   cam X (right)   -> body Y (right)
+#   cam Y (down)    -> body (-X + Z)/sqrt(2) (aft and down)
+#   cam Z (forward) -> body (X + Z)/sqrt(2)  (forward and down)
+_SQRT_HALF = np.sqrt(0.5)
+R_BODY_FROM_CAM_OPTICAL_DOWN45 = np.array(
+    [
+        [0.0, -_SQRT_HALF, _SQRT_HALF],
+        [1.0, 0.0, 0.0],
+        [0.0, _SQRT_HALF, _SQRT_HALF],
+    ]
+)
+
 
 def r_ned_from_body_level(init_yaw_offset_rad: float) -> np.ndarray:
     """Rotation from a level body FRD frame to NED, for a given heading.

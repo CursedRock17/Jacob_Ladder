@@ -114,6 +114,7 @@ ros2 run oak_d_visual_odometry cuvslam_publisher_px4_node \
 | `publish_imu` | `true` | Publish raw OAK IMU on `/imu/data` |
 | `enable_imu_fusion` | `false` | Feed OAK IMU samples into cuVSLAM |
 | `init_yaw_offset_deg` | `0.0` | Heading of camera-forward at startup, deg CW from north |
+| `camera_mounting` | `forward` | Mounting preset: `forward`, `down`, or `down45` (45° depression) |
 | `t_body_cam` | `[0,0,0]` | cuVSLAM rig origin in body FRD, meters |
 | `R_body_cam_override` | `[]` | 9-element row-major override of rig/OpenCV -> body-FRD |
 | `position_variance` | `[0.01,0.01,0.02]` | NED position variance for PX4 |

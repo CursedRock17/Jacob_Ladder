@@ -55,10 +55,11 @@ oak_d_cuvslam_px4_publisher:
     rgb_camera_info_topic: /rgb/camera_info
     px4_topic: /fmu/in/vehicle_visual_odometry
     init_yaw_offset_deg: 0.0
-    # Camera bolted to the airframe looking straight down (nadir), image top
-    # toward the nose. See frames.R_BODY_FROM_CAM_OPTICAL_DOWN. If the physical
-    # in-plane orientation differs, set R_body_cam_override with a 3x3 matrix.
-    camera_mounting: down
+    # Camera bolted to the airframe tilted 45 degrees up from nadir (45 degree
+    # angle of depression), image top toward the nose. See
+    # frames.R_BODY_FROM_CAM_OPTICAL_DOWN45. If the physical orientation
+    # differs, set R_body_cam_override with a 3x3 matrix.
+    camera_mounting: down45
     t_body_cam: [0.0, 0.0, 0.0]
     R_body_cam_override: []
     position_variance: [0.01, 0.01, 0.02]

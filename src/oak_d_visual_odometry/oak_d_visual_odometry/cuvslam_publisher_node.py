@@ -372,6 +372,7 @@ class CuVslamPublisherNode(Node):
         presets = {
             "forward": frames.R_BODY_FROM_CAM_OPTICAL,
             "down": frames.R_BODY_FROM_CAM_OPTICAL_DOWN,
+            "down45": frames.R_BODY_FROM_CAM_OPTICAL_DOWN45,
         }
         preset = presets.get(mounting)
         if preset is None:
