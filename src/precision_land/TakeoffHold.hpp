@@ -1,5 +1,7 @@
 #pragma once
 
+#include "StatePublisher.hpp"
+
 #include <px4_ros2/components/mode.hpp>
 #include <px4_ros2/components/mode_executor.hpp>
 #include <px4_ros2/control/setpoint_types/experimental/trajectory.hpp>
@@ -27,6 +29,9 @@ public:
 	void onDeactivate() override;
 	void updateSetpoint(float dt_s) override;
 
+	// Shared with the executor so the whole flight is one state timeline.
+	StatePublisher& statePublisher() { return _state_pub; }
+
 private:
 	enum class TakeoffState {
 		OpticalFlowInit,  // Climb to 0.1m, hold for optical flow stabilization
@@ -35,6 +40,7 @@ private:
 	};
 
 	rclcpp::Node& _node;
+	StatePublisher _state_pub;
 
 	std::shared_ptr<px4_ros2::OdometryLocalPosition> _vehicle_local_position;
 	std::shared_ptr<px4_ros2::TrajectorySetpointType> _trajectory_setpoint;
@@ -52,15 +58,6 @@ private:
 	float _target_height = 1.25f;           // meters — final hold altitude
 	float _climb_rate = 0.3f;              // m/s — vertical climb speed
 	float _delta_position = 0.25f;         // meters — position tolerance for "reached"
-
-public:
-	// Compute AMSL altitude for a given height above home (used by executor for takeoff)
-	float heightToAmsl(float height_above_home) const
-	{
-		return _vehicle_local_position->last().ref_alt + height_above_home;
-	}
-
-	float opticalFlowHeight() const { return _optical_flow_height; }
 };
 
 // Executor: arms -> takeoff to optical flow height -> schedules hold mode
@@ -71,7 +68,6 @@ public:
 
 	enum class State {
 		Arming,
-		TakingOff,
 		Hold,
 	};
 

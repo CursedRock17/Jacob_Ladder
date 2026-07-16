@@ -13,6 +13,7 @@ jacob_ladder.env
 # Flight data generated during local runs
 rosbags/
 flight_rosbags/
+flight_logs
 *.bag
 *.db3
 *.mcap
@@ -28,6 +29,9 @@ __pycache__/
 .ruff_cache/
 .coverage
 htmlcov/
+xfer-linux-aarch64-musl
 
 # DepthAI generated caches and crash dumps
 .depthai_cached_models/
+
+

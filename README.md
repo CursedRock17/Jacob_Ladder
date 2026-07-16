@@ -64,6 +64,7 @@ START HERE:
 | **Front-Camera Approach** | Fly toward a target detected by a forward-facing camera using PID control |
 | **Combined Approach + Land** | Use a front camera to approach, then seamlessly hand off to a downward camera for precision landing |
 | **Drogue Collection** | Detect a drogue target via YOLO, plan a smooth S-curve trajectory, and fly to it |
+| **GPS-Denied Flight (VIO)** | Estimate position indoors with an OAK-D stereo camera and NVIDIA cuVSLAM, fed to PX4's EKF2 as external vision — see [oak_d_visual_odometry](src/oak_d_visual_odometry) |
 | **Takeoff & Hold** | Simple building-block modes for taking off, holding altitude, and landing |
 
 ## If You're New to ROS 2
@@ -258,7 +259,7 @@ Every script follows the same shape: the first tab is PX4 SITL (or omitted for r
 For more detailed tutorials checkout the [`general_docs`](general_docs) section of the project
 which contains information on how to:
   - [Playback Data](general_docs/reviewing_flight_data.md) after the flights
-  - [Running on](general_docs/real_hardware.md) real hardware
+  - [Running on](general_docs/setting_up_real_hardware.md) real hardware
   - **[`general_docs/external_modes.md`](general_docs/external_modes.md)** — Building your own modes
   - More to Come
  

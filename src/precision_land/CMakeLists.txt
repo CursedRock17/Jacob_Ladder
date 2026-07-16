@@ -14,6 +14,7 @@ find_package(Eigen3 REQUIRED)
 
 find_package(px4_ros2_cpp REQUIRED)
 find_package(geometry_msgs REQUIRED)
+find_package(std_msgs REQUIRED)
 find_package(nav_msgs REQUIRED)
 find_package(visualization_msgs REQUIRED)
 find_package(tf2_ros REQUIRED)
@@ -46,14 +47,14 @@ target_compile_features(visualizer PUBLIC c_std_99 cxx_std_17)
 add_executable(takeoff_land
     TakeoffLand.cpp
 )
-ament_target_dependencies(takeoff_land rclcpp Eigen3 px4_ros2_cpp geometry_msgs tf2_ros tf2)
+ament_target_dependencies(takeoff_land rclcpp Eigen3 px4_ros2_cpp geometry_msgs std_msgs tf2_ros tf2)
 target_compile_features(takeoff_land PUBLIC c_std_99 cxx_std_17)
 
 # Change to This Mode: It will automatically arm, take off and hover
 add_executable(takeoff_hold
     TakeoffHold.cpp
 )
-ament_target_dependencies(takeoff_hold rclcpp Eigen3 px4_ros2_cpp geometry_msgs tf2_ros tf2)
+ament_target_dependencies(takeoff_hold rclcpp Eigen3 px4_ros2_cpp geometry_msgs std_msgs tf2_ros tf2)
 target_compile_features(takeoff_hold PUBLIC c_std_99 cxx_std_17)
 
 # Front camera approach mission

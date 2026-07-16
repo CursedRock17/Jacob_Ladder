@@ -1,0 +1,149 @@
+{
+  "configById": {
+    "Image!drgimg": {
+      "cameraState": {
+        "distance": 20,
+        "perspective": true,
+        "phi": 60,
+        "target": [0, 0, 0],
+        "targetOffset": [0, 0, 0],
+        "targetOrientation": [0, 0, 0, 1],
+        "thetaOffset": 45,
+        "fovy": 45,
+        "near": 0.5,
+        "far": 5000
+      },
+      "followMode": "follow-pose",
+      "scene": {},
+      "transforms": {},
+      "topics": {},
+      "layers": {},
+      "imageMode": {
+        "imageTopic": "/detections_image/compressed",
+        "calibrationTopic": "/front/camera/camera_info"
+      }
+    },
+    "3D!drgpose": {
+      "cameraState": {
+        "distance": 8,
+        "perspective": true,
+        "phi": 60,
+        "target": [0, 0, 0],
+        "targetOffset": [0, 0, 0],
+        "targetOrientation": [0, 0, 0, 1],
+        "thetaOffset": 45,
+        "fovy": 45,
+        "near": 0.1,
+        "far": 500
+      },
+      "followMode": "follow-none",
+      "scene": {
+        "enableStats": false
+      },
+      "transforms": {},
+      "topics": {
+        "/tag_detections": {
+          "visible": true,
+          "type": "arrow",
+          "arrowScale": [1, 0.15, 0.15],
+          "color": "#4e98e2"
+        }
+      },
+      "layers": {
+        "grid": {
+          "layerId": "foxglove.Grid",
+          "visible": true
+        }
+      }
+    },
+    "Plot!drgrange": {
+      "paths": [
+        {
+          "timestampMethod": "receiveTime",
+          "value": "/tag_detections.pose.position.z",
+          "enabled": true,
+          "color": "#4e98e2",
+          "id": "a1000000-0000-4000-8000-000000000001",
+          "label": "Range (m)"
+        },
+        {
+          "timestampMethod": "receiveTime",
+          "value": "/tag_detections.pose.position.x",
+          "enabled": true,
+          "color": "#f5774d",
+          "id": "a1000000-0000-4000-8000-000000000002",
+          "label": "Offset X (m)"
+        },
+        {
+          "timestampMethod": "receiveTime",
+          "value": "/tag_detections.pose.position.y",
+          "enabled": true,
+          "color": "#f7df71",
+          "id": "a1000000-0000-4000-8000-000000000003",
+          "label": "Offset Y (m)"
+        }
+      ]
+    },
+    "Plot!drgconf": {
+      "paths": [
+        {
+          "timestampMethod": "receiveTime",
+          "value": "/detections.detections[0].results[0].hypothesis.score",
+          "enabled": true,
+          "color": "#8bd94f",
+          "id": "a1000000-0000-4000-8000-000000000004",
+          "label": "Detection confidence"
+        }
+      ],
+      "minYValue": 0,
+      "maxYValue": 1
+    },
+    "RawMessages!drgxyz": {
+      "topicPath": "/tag_detections.pose.position"
+    },
+    "Tab!drgleft": {
+      "activeTabIdx": 0,
+      "tabs": [
+        {
+          "title": "Drogue Tracking",
+          "layout": "Image!drgimg"
+        }
+      ]
+    },
+    "Tab!drgright": {
+      "activeTabIdx": 0,
+      "tabs": [
+        {
+          "title": "Pose + Ranging",
+          "layout": {
+            "first": "3D!drgpose",
+            "second": {
+              "first": "Plot!drgrange",
+              "second": {
+                "first": "Plot!drgconf",
+                "second": "RawMessages!drgxyz",
+                "direction": "row",
+                "splitPercentage": 55
+              },
+              "direction": "column",
+              "splitPercentage": 55
+            },
+            "direction": "column",
+            "splitPercentage": 35
+          }
+        }
+      ]
+    }
+  },
+  "globalVariables": {},
+  "userNodes": {},
+  "playbackConfig": {
+    "speed": 1
+  },
+  "layout": {
+    "direction": "row",
+    "first": "Tab!drgleft",
+    "second": "Tab!drgright",
+    "splitPercentage": 60
+  }
+}

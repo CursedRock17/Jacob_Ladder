@@ -35,3 +35,26 @@ Or run the launch command:
 ```shell
 ros2 launch ros2_yolo_image_processing auto_nodes.launch.py
 ```
+
+## Model
+
+`drogue_detection_node` loads the YOLO26n Coupler/Drogue model
+(`src/drogue_flight/models/yolov26.pt`, trained at imgsz 416, classes
+`{0: Coupler, 1: Drogue}`) by default. Override with the `model_path`
+parameter to swap models — the older `best.pt` uses the same class IDs:
+
+```shell
+ros2 run ros2_yolo_image_processing drogue_detection_node --ros-args -p model_path:=/path/to/other.pt
+```
+
+## Pose estimation
+
+`pose_estimation_node` publishes `PoseStamped` on `tag_dectections` in
+**meters**, in a camera-aligned frame: **+x left, +y up, +z forward**.
+
+Parameters:
+
+| Parameter | Default | Description |
+| --- | --- | --- |
+| `fx`, `fy`, `cx`, `cy` | DFK 23UM021 calibration | Camera intrinsics; automatically overridden by the first `camera_info` message, so remap `camera_info` to your camera driver's topic and these defaults are moot |
+| `use_attitude_correction` | `false` | Subscribe to `/fmu/out/vehicle_attitude` (px4_msgs) and rotate the estimate into a level, north-referenced frame (same +x left/+y up/+z forward layout) |

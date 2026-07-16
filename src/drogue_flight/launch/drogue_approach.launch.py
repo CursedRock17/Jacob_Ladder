@@ -1,10 +1,16 @@
-from datetime import datetime
+import os
+import yaml
+
+from ament_index_python.packages import get_package_share_directory
 
 from launch import LaunchDescription
-from launch.actions import ExecuteProcess
-from launch_ros.actions import Node
-from launch.substitutions import PathJoinSubstitution
-from launch_ros.substitutions import FindPackageShare
+from launch.actions import ExecuteProcess, IncludeLaunchDescription
+from launch.actions import DeclareLaunchArgument
+from launch.substitutions import LaunchConfiguration
+from launch_ros.actions import Node, ComposableNodeContainer
+from launch_ros.descriptions import ComposableNode
+from launch_xml.launch_description_sources import XMLLaunchDescriptionSource
+
 
 
 def generate_launch_description():
@@ -28,6 +34,25 @@ def generate_launch_description():
             qos_overrides,
         ],
         output="log",
+    )
+    
+    # ROS 2 Node that runs the autonomous landing code
+    drone_smooth_planner_node = Node(
+        package="drogue_flight",
+        executable="drone_smooth_planner",
+        parameters=[
+            {
+                "num_waypoints": num_waypoints,
+                "setpoint_rate_hz": setpoint_rate_hz,
+                "s_curve_steepness": s_curve_steepness,
+                "waypoint_tolerance_m": waypoint_tolerance_m,
+                "namespace": namespace,
+                "max_velocity": max_velocity,
+                "max_acceleration": max_acceleration,
+            }
+        ],
+        name="drone_smooth_planner",
+        output="screen",
     )
 
     return LaunchDescription(

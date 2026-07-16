@@ -40,10 +40,13 @@ class DrogueDetectionNode(Node):
         """
         super().__init__("drogue_detection_node")
 
-        # Find our local Pytorch Neural Network, then establish the tensors
-        self.MODEL_FILEPATH = (
-            "/home/usmsm/Jacob_Ladder/src/drogue_flight/models/best.pt"
-        )
+        # Find our local Pytorch Neural Network, then establish the tensors.
+        # Default is the YOLO26n Coupler/Drogue model (trained at imgsz 416,
+        # classes {0: Coupler, 1: Drogue} — same IDs as the older best.pt).
+        self.MODEL_FILEPATH = self.declare_parameter(
+            "model_path",
+            "/home/usmsm/Jacob_Ladder/src/drogue_flight/models/yolov26.pt",
+        ).value
         self.IMGSZ = 416
         self.CONF = 0.25
         self.IOU = 0.45

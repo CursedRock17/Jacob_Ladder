@@ -17,8 +17,9 @@ DroneSmoothPlanner::DroneSmoothPlanner(rclcpp::Node& node)
 	// Allow running even if some px4_msgs fields differ between versions
 	setSkipMessageCompatibilityCheck();
 
-	// PX4 odometry source for current NED position
+	// PX4 odometry source for current NED position and attitude
 	_vehicle_local_position = std::make_shared<px4_ros2::OdometryLocalPosition>(*this);
+	_vehicle_attitude = std::make_shared<px4_ros2::OdometryAttitude>(*this);
 	// Trajectory setpoint interface — feeds position/velocity/accel to PX4
 	_trajectory_setpoint = std::make_shared<px4_ros2::TrajectorySetpointType>(*this);
 
@@ -36,21 +37,31 @@ DroneSmoothPlanner::DroneSmoothPlanner(rclcpp::Node& node)
 
 void DroneSmoothPlanner::loadParameters()
 {
+	_node.declare_parameter<float>("takeoff_height", 1.75f);
+	_node.declare_parameter<float>("climb_rate", 0.3f);
+	_node.declare_parameter<float>("takeoff_reached_tol", 0.10f);
 	_node.declare_parameter<int>("num_waypoints", 10);
 	_node.declare_parameter<float>("s_curve_steepness", 4.0f);
 	_node.declare_parameter<float>("waypoint_tolerance_m", 0.15f);
 	_node.declare_parameter<float>("max_velocity", 0.5f);
 	_node.declare_parameter<float>("max_acceleration", 0.35f);
-	_node.declare_parameter<float>("replan_threshold", 0.10f);
+	_node.declare_parameter<float>("replan_threshold", 0.35f);
+	_node.declare_parameter<float>("replan_min_interval", 0.5f);
+	_node.declare_parameter<float>("camera_pitch_deg", 0.0f);
 	_node.declare_parameter<float>("hover_duration", 1.5f);
 	_node.declare_parameter<float>("drogue_timeout", 3.0f);
 
+	_node.get_parameter("takeoff_height", _param_takeoff_height);
+	_node.get_parameter("climb_rate", _param_climb_rate);
+	_node.get_parameter("takeoff_reached_tol", _param_takeoff_reached_tol);
 	_node.get_parameter("num_waypoints", _param_num_waypoints);
 	_node.get_parameter("s_curve_steepness", _param_s_curve_steepness);
 	_node.get_parameter("waypoint_tolerance_m", _param_waypoint_tolerance_m);
 	_node.get_parameter("max_velocity", _param_max_velocity);
 	_node.get_parameter("max_acceleration", _param_max_acceleration);
 	_node.get_parameter("replan_threshold", _param_replan_threshold);
+	_node.get_parameter("replan_min_interval", _param_replan_min_interval);
+	_node.get_parameter("camera_pitch_deg", _param_camera_pitch_deg);
 	_node.get_parameter("hover_duration", _param_hover_duration);
 	_node.get_parameter("drogue_timeout", _param_drogue_timeout);
 }
@@ -71,8 +82,17 @@ void DroneSmoothPlanner::onActivate()
 	_path.clear();
 	_path_index = 0;
 	_drogue_valid = false;
-	switchToState(State::Search);
-	RCLCPP_INFO(_node.get_logger(), "DroneSmoothPlanner activated — searching for drogue");
+	_last_plan_time = _node.now();
+	_last_plan_target_ned = Eigen::Vector3f::Zero();
+
+	// Capture the arm position so the climb (and XY hold) is relative to it
+	_base_position = _vehicle_local_position->positionNed();
+	_takeoff_setpoint = _base_position;
+
+	switchToState(State::Takeoff);
+	RCLCPP_INFO(_node.get_logger(),
+		"DroneSmoothPlanner activated — climbing %.2f m above arm position at %.1f m/s",
+		_param_takeoff_height, _param_climb_rate);
 }
 
 void DroneSmoothPlanner::onDeactivate()
@@ -90,6 +110,37 @@ void DroneSmoothPlanner::updateSetpoint(float dt_s)
 		(now - _drogue_timestamp).seconds() > _param_drogue_timeout;
 
 	switch (_state) {
+
+	case State::Takeoff: {
+		// Target altitude is takeoff_height above the arm position (NED: up is -z)
+		const float target_z = _base_position.z() - _param_takeoff_height;
+		const float current_z = _vehicle_local_position->positionNed().z();
+		const float altitude_gained = _base_position.z() - current_z;
+
+		RCLCPP_INFO_THROTTLE(_node.get_logger(), *_node.get_clock(), 2000,
+			"[Takeoff] height: %.2f m | target: %.2f m | setpoint_z: %.2f m",
+			altitude_gained, _param_takeoff_height, _takeoff_setpoint.z());
+
+		// Ramp the z setpoint upward at climb_rate; XY stays fixed at the arm position
+		_takeoff_setpoint.z() -= _param_climb_rate * dt_s;
+		if (_takeoff_setpoint.z() <= target_z) {
+			_takeoff_setpoint.z() = target_z;
+		}
+
+		px4_ros2::TrajectorySetpoint setpoint;
+		setpoint.withPosition(_takeoff_setpoint)
+			.withVelocityZ(-_param_climb_rate)
+			.withYaw(0.0f);
+		_trajectory_setpoint->update(setpoint);
+
+		// Hand off to search once the drone has actually reached the target height
+		if (altitude_gained >= _param_takeoff_height - _param_takeoff_reached_tol) {
+			RCLCPP_INFO(_node.get_logger(),
+				"Reached takeoff height (%.2f m) — searching for drogue", altitude_gained);
+			switchToState(State::Search);
+		}
+		break;
+	}
 
 	case State::Search: {
 		RCLCPP_INFO_THROTTLE(_node.get_logger(), *_node.get_clock(), 3000,
@@ -127,16 +178,22 @@ void DroneSmoothPlanner::updateSetpoint(float dt_s)
 			break;
 		}
 
-		// Replan trajectory if drogue drifted past the threshold
+		// Replan only when a *fresh* detection has arrived (timestamp advanced past
+		// the last plan), the rate limit has elapsed, and the drogue's absolute NED
+		// target has actually moved past the deadband. This avoids thrashing on
+		// measurement jitter and on our own motion against a stale drogue pose.
 		if (_path_index > 0 && !_path.empty()) {
-			Eigen::Vector3f vehicle_pos = _vehicle_local_position->positionNed();
-			Eigen::Vector3f current_target = vehicle_pos + _drogue_pose;
-			Eigen::Vector3f last_path_target = _path.back().position;
-			float movement = computeDistance(last_path_target, current_target);
+			const bool fresh_detection = _drogue_timestamp > _last_plan_time;
+			const bool interval_elapsed =
+				(now - _last_plan_time).seconds() >= _param_replan_min_interval;
+			Eigen::Vector3f target_ned;
 
-			if (movement > _param_replan_threshold) {
-				RCLCPP_INFO(_node.get_logger(), "Drogue moved %.2fm — replanning", movement);
-				generateTrajectoryToDrogue();
+			if (fresh_detection && interval_elapsed && drogueTargetNed(target_ned)) {
+				float movement = computeDistance(_last_plan_target_ned, target_ned);
+				if (movement > _param_replan_threshold) {
+					RCLCPP_INFO(_node.get_logger(), "Drogue moved %.2fm — replanning", movement);
+					generateTrajectoryToDrogue();
+				}
 			}
 		}
 
@@ -203,6 +260,40 @@ void DroneSmoothPlanner::updateSetpoint(float dt_s)
 	}
 }
 
+// ── Frame transform ──
+
+// The ranging pipeline (pose_estimation_node) publishes the drogue in a camera
+// ranging frame: +x = left, +y = up, +z = forward. To command NED setpoints we
+// rotate that into NED via the vehicle attitude, matching the mapping the pose
+// node itself uses in apply_attitude_correction():
+//   ranging (x_left, y_up, z_fwd) -> body FRD (fwd, right, down) = (z, -x, -y)
+//   body FRD -> NED via the attitude quaternion (which is body-FRD -> NED)
+bool DroneSmoothPlanner::drogueTargetNed(Eigen::Vector3f& target_ned) const
+{
+	if (!_drogue_valid) {
+		return false;
+	}
+
+	// Attitude may not have arrived yet — a zero/degenerate quaternion is unusable
+	Eigen::Quaternionf q = _vehicle_attitude->attitude();
+	if (!std::isfinite(q.w()) || q.norm() < 0.1f) {
+		return false;
+	}
+	q.normalize();
+
+	// Ranging (+x left, +y up, +z forward) -> body FRD, assuming the camera optical
+	// axis is body-forward. If the forward cam is mounted with a fixed pitch, tilt
+	// the vector by that mount angle (positive camera_pitch_deg = tilted down).
+	const Eigen::Vector3f frd_cam(_drogue_pose.z(), -_drogue_pose.x(), -_drogue_pose.y());
+	const float pitch_rad = _param_camera_pitch_deg * static_cast<float>(M_PI) / 180.0f;
+	const Eigen::Vector3f frd =
+		Eigen::AngleAxisf(-pitch_rad, Eigen::Vector3f::UnitY()) * frd_cam;
+
+	const Eigen::Vector3f ned_offset = q * frd;
+	target_ned = _vehicle_local_position->positionNed() + ned_offset;
+	return true;
+}
+
 // ── S-Curve Trajectory Generation ──
 
 // Build a full S-curve trajectory from current position to the drogue
@@ -210,14 +301,20 @@ void DroneSmoothPlanner::generateTrajectoryToDrogue()
 {
 	Eigen::Vector3f vehicle_pos = _vehicle_local_position->positionNed();
 
-	if (!_drogue_valid) {
-		RCLCPP_WARN(_node.get_logger(), "Cannot generate trajectory — no drogue pose");
+	// Transform the camera-frame drogue pose into an absolute NED target. This also
+	// guards against a missing drogue pose or an attitude estimate that isn't ready.
+	Eigen::Vector3f end_pos;
+	if (!drogueTargetNed(end_pos)) {
+		RCLCPP_WARN(_node.get_logger(),
+			"Cannot generate trajectory — no drogue pose or attitude estimate yet");
 		return;
 	}
 
-	// Convert relative drogue pose to absolute NED target
 	Eigen::Vector3f start_pos = vehicle_pos;
-	Eigen::Vector3f end_pos = vehicle_pos + _drogue_pose;
+
+	// Remember this plan so the Approach replan check can measure real drift
+	_last_plan_target_ned = end_pos;
+	_last_plan_time = _node.now();
 
 	// Interpolate positions along a tanh S-curve
 	auto waypoints = generateSCurveWaypoints(start_pos, end_pos, _param_num_waypoints);
@@ -409,6 +506,7 @@ void DroneSmoothPlanner::switchToState(State state)
 std::string DroneSmoothPlanner::stateName(State state) const
 {
 	switch (state) {
+	case State::Takeoff:  return "Takeoff";
 	case State::Search:   return "Search";
 	case State::Approach: return "Approach";
 	case State::Hover:    return "Hover";
@@ -417,21 +515,19 @@ std::string DroneSmoothPlanner::stateName(State state) const
 	}
 }
 
-// ── Executor: arm -> takeoff -> schedule DroneSmoothPlanner mode ──
+// ── Executor: arm -> schedule DroneSmoothPlanner mode (climb runs in-mode) ──
 
 DroneSmoothPlannerExecutor::DroneSmoothPlannerExecutor(rclcpp::Node& node, px4_ros2::ModeBase& owned_mode)
 	: ModeExecutorBase(node, ModeExecutorBase::Settings{Settings::Activation::ActivateAlways}, owned_mode)
 	, _node(node)
 {
-	// Takeoff altitude is configurable at launch time
-	_node.declare_parameter<float>("takeoff_height", 2.5f);
-	_node.get_parameter("takeoff_height", _param_takeoff_height);
+	// Allow running even if some px4_msgs fields differ between versions
+	setSkipMessageCompatibilityCheck();
 }
 
 void DroneSmoothPlannerExecutor::onActivate()
 {
-	RCLCPP_INFO(_node.get_logger(),
-		"DroneSmoothPlanner executor — arming and taking off to %.1f m", _param_takeoff_height);
+	RCLCPP_INFO(_node.get_logger(), "DroneSmoothPlanner executor — arming");
 	runState(State::Arming, px4_ros2::Result::Success);
 }
 
@@ -450,16 +546,13 @@ void DroneSmoothPlannerExecutor::runState(State state, px4_ros2::Result result)
 
 	switch (state) {
 	case State::Arming:
-		arm([this](px4_ros2::Result r) { runState(State::TakingOff, r); });
-		break;
-
-	case State::TakingOff:
-		takeoff([this](px4_ros2::Result r) { runState(State::Approaching, r); },
-			_param_takeoff_height);
+		// GPS-denied: skip PX4 auto-takeoff (needs AMSL we don't have) and let the
+		// mode's Takeoff state climb via local-NED trajectory setpoints.
+		arm([this](px4_ros2::Result r) { runState(State::Approaching, r); });
 		break;
 
 	case State::Approaching:
-		RCLCPP_INFO(_node.get_logger(), "Takeoff complete — starting S-curve approach");
+		RCLCPP_INFO(_node.get_logger(), "Armed — handing off to DroneSmoothPlanner mode");
 		scheduleMode(ownedMode().id(), [this](px4_ros2::Result r) {
 			RCLCPP_INFO(_node.get_logger(), "DroneSmoothPlanner mode ended (%s)", resultToString(r));
 		});

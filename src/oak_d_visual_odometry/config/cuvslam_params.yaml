@@ -1,10 +1,13 @@
 oak_d_cuvslam_publisher:
   ros__parameters:
+    # VIO always uses the OAK-D S2 (the only camera on the airframe since the
+    # OAK-D Lite was removed 2026-07-16).
+    device_id: "1944301041EB1B1300"
     width: 640
     height: 400
     camera_fps: 30.0
-    rgb_fps: 15.0
-    warmup_frames: 30
+    rgb_fps: 30.0
+    warmup_frames: 50
     publish_rgb: true
     publish_stereo_images: false
     publish_features: true
@@ -21,8 +24,10 @@ oak_d_cuvslam_publisher:
     imu_frame_id: oak_imu
     odom_topic: /slam/odometry
     imu_topic: /imu/data
-    rgb_topic: /rgb/image
-    rgb_camera_info_topic: /rgb/camera_info
+    # Same /front/camera names as the PX4 node below: the S2's CAM_A stream
+    # is the drogue-detection front camera now that the OAK-D Lite is gone.
+    rgb_topic: /front/camera/image_raw
+    rgb_camera_info_topic: /front/camera/camera_info
     left_image_topic: /left/image
     right_image_topic: /right/image
     left_camera_info_topic: /left/camera_info
@@ -30,17 +35,50 @@ oak_d_cuvslam_publisher:
 
 oak_d_cuvslam_px4_publisher:
   ros__parameters:
+    # VIO always uses the OAK-D S2 (the only camera on the airframe since the
+    # OAK-D Lite was removed 2026-07-16).
+    device_id: "1944301041EB1B1300"
     width: 640
     height: 400
     camera_fps: 30.0
-    rgb_fps: 15.0
+    rgb_fps: 30.0
     warmup_frames: 30
     publish_rgb: true
     publish_stereo_images: false
     publish_features: true
     feature_point_radius: 3
     publish_imu: true
+    # Stereo-only for now. IMU fusion is disabled after the 2026-07-07 bench
+    # walks: every camera-stream stall turned into an inertial dead-reckoning
+    # teleport (6-38 m) that permanently corrupted the tracker state, and the
+    # per-flight scale wander (vertical legs read 1.35x/1.66x long, EEPROM
+    # baseline verified nominal at 7.54 cm) matches visual-inertial scale
+    # estimation drifting, not stereo. Re-enable once the OAK-D USB link is
+    # proven stall-free (see services/99-oak-usb-power.rules). Earlier caveat
+    # still applies when re-enabling: cuVSLAM's visual-inertial init
+    # ("LinearAlignment failed") struggles after a long static sit; the
+    # max_vio_speed_mps gate and reacquire hysteresis keep teleports away
+    # from PX4. IMU->CAM_A extrinsics come from the device EEPROM
+    # (imu_extrinsics_source: calibration) and were verified against gravity.
     enable_imu_fusion: false
+    imu_rate_hz: 200
+    # Measured delivery rate from the 2026-07-07 first_flight bag was ~163 Hz
+    # despite requesting 200; re-measure before re-enabling fusion.
+    imu_frequency_hz: 163.0
+    imu_extrinsics_source: calibration
+    # Noise densities measured from the same bag's 20 s static window
+    # (gyro 1.0e-4 rad/s/rtHz, accel 1.2e-3 m/s^2/rtHz — both at BMI270
+    # spec), with ~3x margin for in-flight vibration. The old values
+    # (0.001/0.02) were 10-18x too pessimistic, mis-weighting the IMU in
+    # cuVSLAM's visual-inertial optimization.
+    # Random walks were NOT measured (a 20 s window is too short); they are
+    # datasheet-order guesses. Isaac ROS ships 0.000019 gyro / 0.003 accel
+    # for its RealSense BMI085-class defaults — if fusion is re-enabled and
+    # biases drift, the accel value here is the suspect (30x below theirs).
+    imu_gyro_noise_density: 0.0003
+    imu_gyro_random_walk: 0.00001
+    imu_accel_noise_density: 0.004
+    imu_accel_random_walk: 0.0001
     use_gpu: true
     async_sba: false
     rectified_stereo_camera: false
@@ -51,17 +89,74 @@ oak_d_cuvslam_px4_publisher:
     imu_frame_id: oak_imu
     odom_topic: /slam/odometry
     imu_topic: /imu/data
-    rgb_topic: /rgb/image
-    rgb_camera_info_topic: /rgb/camera_info
+    # With the OAK-D Lite removed (2026-07-16), the S2's CAM_A color stream
+    # doubles as the drogue-detection front camera. Publishing on the
+    # /front/camera names keeps drogue_detection_node, pose_estimation_node,
+    # and foxglove_wifi.sh unchanged. CAM_A runs at 30 fps (rgb_fps above),
+    # matching what the Lite delivered.
+    rgb_topic: /front/camera/image_raw
+    rgb_camera_info_topic: /front/camera/camera_info
     px4_topic: /fmu/in/vehicle_visual_odometry
     init_yaw_offset_deg: 0.0
-    # Camera bolted to the airframe tilted 45 degrees up from nadir (45 degree
-    # angle of depression), image top toward the nose. See
-    # frames.R_BODY_FROM_CAM_OPTICAL_DOWN45. If the physical orientation
-    # differs, set R_body_cam_override with a 3x3 matrix.
-    camera_mounting: down45
+    # OAK-D S2 moved to the forward mount (2026-07-16) after the 30/45 degree
+    # tilted mounts produced scale errors in flight; forward-facing ground
+    # tests read near-perfect on /slam/odometry. Boresight along body +X,
+    # image top toward the sky. If the mount changes again use down<degrees>
+    # (angle of depression) or set R_body_cam_override with a 3x3 matrix,
+    # and re-verify against static gravity via the EEPROM IMU->CAM_A
+    # extrinsics (see frames.r_body_from_cam_depression).
+    camera_mounting: forward
     t_body_cam: [0.0, 0.0, 0.0]
     R_body_cam_override: []
+    # Exclude features near the distorted borders of the unrectified mono
+    # images, per NVIDIA's OAK-D example (50/70/70 at 1280x720, scaled to
+    # 640x400). Format: [top, bottom, left, right] pixels. The outer edge of
+    # each eye (left edge of the left eye, right edge of the right eye) is
+    # cut to 64 px (10% of width, the TROUBLESHOOTING.md step-8 maximum,
+    # mirrored per eye like Isaac ROS) because that strip is outside the
+    # stereo overlap and can never triangulate.
+    left_border_mask: [25, 0, 64, 35]
+    right_border_mask: [25, 0, 35, 64]
+    # cuVSLAM's broken-stream threshold. <= 0 auto-selects 3 frame intervals
+    # (0.1 s at 30 fps) so the tracker itself treats a stalled stream as a
+    # discontinuity instead of LK-tracking across it (the library default of
+    # 1.0 s allows a 30-frame gap; Isaac ROS uses ~one frame period).
+    max_frame_delta_s: -1.0
+    # Multicamera engine trade-off: moderate / performance / precision.
+    # Empty keeps the PyCuVSLAM 16.0 default (precision). Isaac ROS ships
+    # performance — try it if track() times grow under flight load.
+    multicam_mode: ""
+    # Floors: with use_cuvslam_covariance the tracker's own per-sample
+    # covariance is reported to EKF2 wherever it exceeds these values, so
+    # degraded tracking de-weights vision instead of being fused at full
+    # confidence.
     position_variance: [0.01, 0.01, 0.02]
     orientation_variance: [0.01, 0.01, 0.02]
     velocity_variance: [0.1, 0.1, 0.1]
+    use_cuvslam_covariance: true
+    # Velocity sent to PX4 is the least-squares slope over this many NED
+    # poses (~330 ms at 30 fps) instead of a two-frame difference, which
+    # would turn the ~5 mm bench pose noise into ~0.3 m/s velocity noise.
+    # The residual scatter about the same fit is reported as an empirical
+    # position variance wherever it exceeds the floors above — unlike the
+    # tracker covariance it actually grows when tracking degrades.
+    velocity_window_frames: 10
+    use_empirical_covariance: true
+    # Warn when a single track() call blocks the pipeline loop longer than
+    # this (frames drop while it runs); a stereo-frame gap longer than
+    # velocity_reset_gap_s skips velocity differentiation across the gap and
+    # bumps reset_counter so EKF2 treats the stream as discontinuous.
+    slow_track_warn_ms: 60.0
+    velocity_reset_gap_s: 0.5
+    # Frame-to-frame motion faster than this is withheld from PX4 as a
+    # mistracking/dead-reckoning runaway (cuVSLAM's covariance stays nominal
+    # through such runaways, so it cannot be the gate). Must exceed the real
+    # flight envelope.
+    max_vio_speed_mps: 10.0
+    # Scene-quality gate. Covered/dark lenses still produce ~450 2D "tracks"
+    # on sensor noise with landmarks3d=0, and runs of them are
+    # self-consistent enough to beat both the speed gate and the reacquire
+    # hysteresis (2026-07-13 bench cover test: 163 m teleports reached PX4
+    # mid-blackout that way). A pose with fewer 3D landmarks than this is
+    # treated as tracking loss. Healthy scenes on this rig: 24-110.
+    min_landmarks_3d: 10

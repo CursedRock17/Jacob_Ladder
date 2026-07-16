@@ -26,6 +26,29 @@ First you will have to install foxglove (TODO: Add foxglove to lucas' docker)
 [Foxglove](https://docs.foxglove.dev/docs/getting-started/frameworks/px4) has the ability to playback both [PX4 uLogs](https://docs.px4.io/main/en/dev_log/ulog_file_format) and [ROSBAGs](https://docs.foxglove.dev/docs/getting-started/frameworks/ros2?modality=recorded) providing extreme flexibility when reviewing data.
 They also provide the ability to monitor all of our data during flight in an easy manner. I leave an example work flow in the [config section](../config/chimera_drone_foxglove.json) section of the project
 
+### Watching live flight data over WiFi (Foxglove)
+
+For live monitoring, run `launch_scripts/foxglove_wifi.sh` on the drone instead
+of a bare `foxglove_bridge` launch (super_real.sh window 7 already does), then
+connect Foxglove Studio on the laptop to `ws://<jetson-wifi-ip>:8765`.
+
+The script exists because raw images don't fit the radio: one 640×400 BGR8
+frame is 768 KB, so a 20 Hz stream needs ~123 Mbps against the ~15–30 Mbps a
+hotspot really delivers — that mismatch is what turned 20 Hz tracking into a
+3 Hz slideshow. The script fixes it by:
+
+- JPEG-compressing the image topics on the Jetson via `image_transport
+  republish` (~25–40 KB/frame → ~5 Mbps at 20 Hz). Quality defaults to 60:
+  `JPEG_QUALITY=40 ./launch_scripts/foxglove_wifi.sh` if the link is bad.
+- Whitelisting the bridge so raw `Image` topics never reach the websocket —
+  **point image panels at the `/compressed` topics**. Edit the whitelist in
+  the script when a new topic needs remote viewing.
+- Capping the bridge send buffer at 1 MB so a congested link drops stale
+  frames instead of queueing seconds of latency.
+
+If the compressed stream still stutters, lower `JPEG_QUALITY` first —
+bandwidth is always suspect #1 on this link (`ros2 topic bw` to confirm).
+
 ### Inspecting a bag (ROS 2 CLI)
 
 We can use the ROS 2 CLI to also inspect our bags:

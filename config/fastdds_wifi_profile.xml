@@ -1,0 +1,99 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!--
+  Fast DDS profile for ROS 2 nodes on the Jetson when a laptop views over WiFi.
+
+  This is NOT the XRCE agent profile (that is config/fastdds_profile.xml and is
+  exported only for the MicroXRCEAgent process). Export this one per-process for
+  ROS 2 nodes / foxglove_bridge:
+
+      export FASTRTPS_DEFAULT_PROFILES_FILE=/home/usmsm/Jacob_Ladder/config/fastdds_wifi_profile.xml
+
+  launch_scripts/foxglove_wifi.sh does this for the viewing stack.
+  Rationale and measurements: general_docs/comms_latency.md
+-->
+<dds>
+    <profiles xmlns="http://www.eprosima.com/XMLSchemas/fastRTPS_Profiles">
+
+        <transport_descriptors>
+            <!-- Shared memory for everything node-to-node on the Jetson.
+                 The default 512 KB segment is smaller than one raw camera
+                 frame (640x400 BGR = 768 KB; the OAK-D Lite RGB is larger),
+                 which silently pushes the onboard image pipeline onto UDP
+                 loopback. 16 MB fits several frames. -->
+            <transport_descriptor>
+                <transport_id>shm_big_segment</transport_id>
+                <type>SHM</type>
+                <segment_size>16777216</segment_size>
+            </transport_descriptor>
+
+            <!-- UDP is then only used for traffic that actually leaves the
+                 Jetson (a laptop running native DDS tools).
+                 - maxMessageSize 1400 keeps every RTPS fragment inside one
+                   WiFi MTU: no IP fragmentation, so a single lost radio frame
+                   costs 1400 bytes (repairable per-fragment on RELIABLE
+                   topics) instead of an entire 64 KB datagram.
+                 - non_blocking_send drops on a full TX ring instead of
+                   stalling the publishing node when the radio backs up.
+                 - 4 MB socket buffers absorb bursts; requires the sysctl bump
+                   in services/99-udp-buffers.conf, otherwise the kernel
+                   clamps to net.core.{r,w}mem_max (208 KB stock). -->
+            <transport_descriptor>
+                <transport_id>udp_wifi</transport_id>
+                <type>UDPv4</type>
+                <maxMessageSize>1400</maxMessageSize>
+                <sendBufferSize>4194304</sendBufferSize>
+                <receiveBufferSize>4194304</receiveBufferSize>
+                <non_blocking_send>true</non_blocking_send>
+            </transport_descriptor>
+        </transport_descriptors>
+
+        <participant profile_name="wifi_default_participant" is_default_profile="true">
+            <rtps>
+                <name>wifi_default_participant</name>
+                <userTransports>
+                    <transport_id>shm_big_segment</transport_id>
+                    <transport_id>udp_wifi</transport_id>
+                </userTransports>
+                <useBuiltinTransports>false</useBuiltinTransports>
+                <builtin>
+                    <!-- Same realloc policy the XRCE profile uses: grow the
+                         history instead of dropping with RTPS_HISTORY errors. -->
+                    <writerHistoryMemoryPolicy>PREALLOCATED_WITH_REALLOC</writerHistoryMemoryPolicy>
+                    <readerHistoryMemoryPolicy>PREALLOCATED_WITH_REALLOC</readerHistoryMemoryPolicy>
+                    <!-- Survive multi-second WiFi hiccups without tearing the
+                         participant down and rediscovering everything. -->
+                    <discovery_config>
+                        <leaseDuration>
+                            <sec>60</sec>
+                        </leaseDuration>
+                        <leaseAnnouncement>
+                            <sec>5</sec>
+                        </leaseAnnouncement>
+                    </discovery_config>
+
+                    <!-- OPTIONAL, for a flaky hotspot: WiFi multicast is sent
+                         at the lowest basic rate and unreliably; discovery
+                         beacons can eat real airtime. To go unicast-only,
+                         uncomment and put the laptop's hotspot IP here, and do
+                         the mirror-image on the laptop with the Jetson's IP.
+                    <initialPeersList>
+                        <locator>
+                            <udpv4>
+                                <address>LAPTOP_IP_HERE</address>
+                            </udpv4>
+                        </locator>
+                    </initialPeersList>
+                    <metatrafficUnicastLocatorList>
+                        <locator>
+                            <udpv4>
+                                <port>0</port>
+                            </udpv4>
+                        </locator>
+                    </metatrafficUnicastLocatorList>
+                    -->
+                </builtin>
+            </rtps>
+        </participant>
+
+    </profiles>
+</dds>

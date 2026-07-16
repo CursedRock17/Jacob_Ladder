@@ -5,4 +5,5 @@ takeoff_land:
     target_height: 1.0
     climb_rate: 0.3
     delta_position: 0.05
-    hold_duration: 5.0
+    hold_duration: 5.0        # seconds to hover at target before landing (mode)
+    safety_timeout: 30.0      # executor lands anyway if the mode never completes

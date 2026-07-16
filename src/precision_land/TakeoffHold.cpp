@@ -10,6 +10,7 @@ namespace precision_land
 TakeoffHoldMode::TakeoffHoldMode(rclcpp::Node& node)
 	: ModeBase(node, Settings{kTakeoffHoldModeName, false})
 	, _node(node)
+	, _state_pub(node)
 	, _base_position(Eigen::Vector3f::Zero())
 	, _hold_position(Eigen::Vector3f::Zero())
 {
@@ -40,6 +41,7 @@ void TakeoffHoldMode::onActivate()
 	_state_elapsed = 0.0f;
 	_reached_flow_height = false;
 	_active = true;
+	_state_pub.set("OpticalFlowInit");
 
 	// Command initial position: optical_flow_height above ground (NED: negative z is up)
 	_hold_position.z() = _base_position.z() - _optical_flow_height;
@@ -52,6 +54,7 @@ void TakeoffHoldMode::onActivate()
 void TakeoffHoldMode::onDeactivate()
 {
 	_active = false;
+	_state_pub.set("Deactivated");
 }
 
 void TakeoffHoldMode::updateSetpoint(float dt_s)
@@ -84,6 +87,7 @@ void TakeoffHoldMode::updateSetpoint(float dt_s)
 		if (_reached_flow_height && _state_elapsed >= _optical_flow_hold_time) {
 			_state = TakeoffState::Climbing;
 			_state_elapsed = 0.0f;
+			_state_pub.set("Climbing");
 			RCLCPP_INFO(_node.get_logger(),
 				"Optical flow stabilized — climbing to %.1f m", _target_height);
 		}
@@ -118,6 +122,7 @@ void TakeoffHoldMode::updateSetpoint(float dt_s)
 		if (altitude_gained >= (_target_height - _delta_position)) {
 			_state = TakeoffState::Holding;
 			_state_elapsed = 0.0f;
+			_state_pub.set("Holding");
 			RCLCPP_INFO(_node.get_logger(),
 				"Reached %.1f m (actual: %.2f m) — holding position",
 				_target_height, altitude_gained);
@@ -154,11 +159,13 @@ TakeoffHoldExecutor::TakeoffHoldExecutor(rclcpp::Node& node, TakeoffHoldMode& ow
 	, _node(node)
 	, _mode(owned_mode)
 {
+	setSkipMessageCompatibilityCheck();
 }
 
 void TakeoffHoldExecutor::onActivate()
 {
 	RCLCPP_INFO(_node.get_logger(), "TakeoffHold executor — arming");
+	_mode.statePublisher().set("Arming");
 	runState(State::Arming, px4_ros2::Result::Success);
 }
 
@@ -171,24 +178,19 @@ void TakeoffHoldExecutor::runState(State state, px4_ros2::Result result)
 	if (result != px4_ros2::Result::Success) {
 		RCLCPP_ERROR(_node.get_logger(), "State %i failed: %s", (int)state,
 			resultToString(result));
+		_mode.statePublisher().set("Failed");
 		return;
 	}
 
 	switch (state) {
 	case State::Arming:
-		arm([this](px4_ros2::Result r) { runState(State::TakingOff, r); });
+		// GPS-denied: skip PX4 auto-takeoff (needs AMSL we don't have) and let the
+		// mode's Climbing state lift off via local-NED trajectory setpoints.
+		arm([this](px4_ros2::Result r) { runState(State::Hold, r); });
 		break;
-
-	case State::TakingOff: {
-		const float takeoff_amsl = _mode.heightToAmsl(_mode.opticalFlowHeight());
-		RCLCPP_INFO(_node.get_logger(),
-			"Arm complete — takeoff to %.2f m (%.2f m AMSL)",
-			_mode.opticalFlowHeight(), takeoff_amsl);
-		takeoff([this](px4_ros2::Result r) { runState(State::Hold, r); }, -0.5f);
-		break;
-	}
 
 	case State::Hold:
+		_mode.statePublisher().set("Armed");
 		scheduleMode(ownedMode().id(), [this](px4_ros2::Result r) {
 			RCLCPP_INFO(_node.get_logger(), "Hold mode ended (%s)", resultToString(r));
 		});

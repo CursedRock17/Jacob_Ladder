@@ -1,14 +1,25 @@
+import math
+
 import rclpy
 from rclpy.node import Node
-from rclpy.qos import qos_profile_system_default
+from rclpy.qos import qos_profile_system_default, qos_profile_sensor_data
 from rclpy.executors import MultiThreadedExecutor
 
 # MSG Libraries
 from vision_msgs.msg import Detection2DArray
 from geometry_msgs.msg import PoseStamped
+from sensor_msgs.msg import CameraInfo
 
 # Math Library
 import numpy as np
+
+# PX4 attitude is optional: only needed when use_attitude_correction is on.
+try:
+    from px4_msgs.msg import VehicleAttitude
+
+    HAVE_PX4_MSGS = True
+except ImportError:
+    HAVE_PX4_MSGS = False
 
 
 class PoseEstimationNode(Node):
@@ -28,13 +39,21 @@ class PoseEstimationNode(Node):
         """
         super().__init__("dnn_ranging_node")
 
-        self.FRAME_W = 1024
-        self.FRAME_H = 768
-        self.FOCAL_LENGTH = 721.7273
+        # Camera intrinsics. Defaults come from the DFK 23UM021 calibration;
+        # they are overridden by the first CameraInfo message if one arrives,
+        # so with the OAK-D Lite driver publishing camera_info these are moot.
+        self.fx = self.declare_parameter("fx", 721.0000).value
+        self.fy = self.declare_parameter("fy", 722.3546).value
+        self.cx = self.declare_parameter("cx", 499.2184).value
+        self.cy = self.declare_parameter("cy", 387.2306).value
+        self._intrinsics_from_camera_info = False
 
-        # Physical widths (inches) of objects
-        self.COUPLER_WIDTH = 10.8
-        self.DROGUE_WIDTH = 26.5
+        # Physical widths of objects, in meters (REP-103). The published pose
+        # is therefore in meters — the old node reported inches.
+        self.OBJECT_WIDTHS_M = {
+            "Coupler": 10.8 * 0.0254,
+            "Drogue": 26.5 * 0.0254,
+        }
 
         # Global PC Offset (adjust if needed)
         self.PC = np.array([0.0, 0.0, 0.0], dtype=float)
@@ -42,6 +61,17 @@ class PoseEstimationNode(Node):
         # YOLO class names (must match detection node)
         self.CLASS_COUPLER = "Coupler"
         self.CLASS_DROGUE = "Drogue"
+
+        # Optional roll/pitch/yaw correction from PX4: rotates the camera-frame
+        # estimate into a level, north-referenced frame using
+        # /fmu/out/vehicle_attitude. Off by default (pure camera frame).
+        self.use_attitude_correction = self.declare_parameter(
+            "use_attitude_correction", False
+        ).value
+        self.roll_rad = 0.0
+        self.pitch_rad = 0.0
+        self.yaw_rad = 0.0
+        self.have_attitude = False
 
         # Create a valid Quality of Service
         default_qos = qos_profile_system_default
@@ -52,71 +82,152 @@ class PoseEstimationNode(Node):
             self.detections_callback,
             qos_profile=default_qos,
         )
+        # Real intrinsics from the camera driver override the defaults above
+        self.camera_info_subscriber = self.create_subscription(
+            CameraInfo,
+            "camera_info",
+            self.camera_info_callback,
+            qos_profile=qos_profile_sensor_data,
+        )
+        if self.use_attitude_correction:
+            if HAVE_PX4_MSGS:
+                self.attitude_subscriber = self.create_subscription(
+                    VehicleAttitude,
+                    "/fmu/out/vehicle_attitude",
+                    self.vehicle_attitude_callback,
+                    qos_profile_sensor_data,
+                )
+            else:
+                self.use_attitude_correction = False
+                self.get_logger().warn(
+                    "use_attitude_correction requested but px4_msgs is not "
+                    "importable; publishing uncorrected camera-frame poses"
+                )
         # Create our Publisher for the pose
         self.pose_publisher = self.create_publisher(
-            PoseStamped, "tag_dectections", qos_profile=default_qos
+            PoseStamped, "tag_detections", qos_profile=default_qos
         )
 
         # Log it
-        self.get_logger().info("Created Pose Estimation Node")
+        self.get_logger().info("Created Pose Estimation Node (units: meters)")
 
-    def ranging_function(self, x1c, y1c, x2c, y2c, n, frame_w=None, frame_h=None):
+    def camera_info_callback(self, msg):
         """
-        Returns [OffsetDistancex, OffsetDistancey, WeightedDistance, FinalDistance]
+        Adopt the camera driver's calibrated intrinsics (once).
         """
-        if frame_w is None:
-            frame_w = self.FRAME_W
-        if frame_h is None:
-            frame_h = self.FRAME_H
+        if self._intrinsics_from_camera_info:
+            return
+        k = msg.k
+        if k[0] <= 0.0:
+            return
+        self.fx, self.fy = float(k[0]), float(k[4])
+        self.cx, self.cy = float(k[2]), float(k[5])
+        self._intrinsics_from_camera_info = True
+        self.get_logger().info(
+            f"Intrinsics from camera_info: fx={self.fx:.1f} fy={self.fy:.1f} "
+            f"cx={self.cx:.1f} cy={self.cy:.1f} ({msg.width}x{msg.height})"
+        )
 
-        FocalLength = 721.7273
-        CouplerWidths = {1: 10.8, 2: 26.5}  # n=1 coupler, n=2 drogue
-        CouplerWidth = CouplerWidths.get(n, 10.8)
+    def vehicle_attitude_callback(self, msg):
+        """
+        Convert the PX4 attitude quaternion (w, x, y, z) to roll/pitch/yaw.
+        """
+        q0, q1, q2, q3 = msg.q
+
+        sinr_cosp = 2.0 * (q0 * q1 + q2 * q3)
+        cosr_cosp = 1.0 - 2.0 * (q1 * q1 + q2 * q2)
+        self.roll_rad = math.atan2(sinr_cosp, cosr_cosp)
+
+        sinp = 2.0 * (q0 * q2 - q3 * q1)
+        if abs(sinp) >= 1.0:
+            self.pitch_rad = math.copysign(math.pi / 2.0, sinp)
+        else:
+            self.pitch_rad = math.asin(sinp)
+
+        siny_cosp = 2.0 * (q0 * q3 + q1 * q2)
+        cosy_cosp = 1.0 - 2.0 * (q2 * q2 + q3 * q3)
+        self.yaw_rad = math.atan2(siny_cosp, cosy_cosp)
+
+        self.have_attitude = True
+
+    def apply_attitude_correction(self, rng4):
+        """
+        Rotate a ranging-frame vector (+x left, +y up, +z forward) through the
+        vehicle attitude into a level NED-aligned frame, then express it back
+        in the same ranging-frame convention.
+        """
+        x_left, y_up, z_forward = rng4[:3]
+        # Ranging frame -> body FRD (+x forward, +y right, +z down)
+        p_body = np.array([z_forward, -x_left, -y_up], dtype=float)
+
+        cr, sr = np.cos(self.roll_rad), np.sin(self.roll_rad)
+        cp, sp = np.cos(self.pitch_rad), np.sin(self.pitch_rad)
+        cy, sy = np.cos(self.yaw_rad), np.sin(self.yaw_rad)
+        rx = np.array([[1, 0, 0], [0, cr, -sr], [0, sr, cr]])
+        ry = np.array([[cp, 0, sp], [0, 1, 0], [-sp, 0, cp]])
+        rz = np.array([[cy, -sy, 0], [sy, cy, 0], [0, 0, 1]])
+        p_ned = rz @ ry @ rx @ p_body
+
+        north, east, down = p_ned
+        return [
+            float(-east),
+            float(-down),
+            float(north),
+            float(np.linalg.norm(p_ned)),
+        ]
+
+    def ranging_function(self, x1c, y1c, x2c, y2c, class_name):
+        """
+        Uses bounding box size and camera intrinsics to estimate range.
+
+        Output frame (meters):
+            +x = left
+            +y = up
+            +z = forward
+            [3] = 3D line-of-sight distance
+        """
+        object_width = self.OBJECT_WIDTHS_M.get(class_name, 10.8 * 0.0254)
 
         xd = abs(x2c - x1c)
         yd = abs(y2c - y1c)
         if xd <= 1 or yd <= 1:
             return [0.0, 0.0, 0.0, 0.0]
 
-        droguex = x1c + xd / 2.0
-        droguey = y1c + yd / 2.0
+        object_center_x = x1c + xd / 2.0
+        object_center_y = y1c + yd / 2.0
 
-        vidcenterx = frame_w / 2.0
-        vidcentery = frame_h / 2.0
+        # Offsets from the calibrated principal point, not the frame center
+        CenterErrorx = self.cx - object_center_x
+        CenterErrory = self.cy - object_center_y
 
-        StraightDistancex = (FocalLength / xd) * CouplerWidth
-        StraightDistancey = (FocalLength / yd) * CouplerWidth
+        StraightDistancex = (self.fx / xd) * object_width
+        StraightDistancey = (self.fy / yd) * object_width
 
-        CenterErrorx = vidcenterx - droguex
-        CenterErrory = vidcentery - droguey
-
-        xErrorWeight = abs(CenterErrorx) / vidcenterx
-        yErrorWeight = abs(CenterErrory) / vidcentery
+        xErrorWeight = abs(CenterErrorx) / self.cx
+        yErrorWeight = abs(CenterErrory) / self.cy
 
         totalError = xErrorWeight + yErrorWeight
         if totalError == 0:
-            return [0.0, 0.0, 0.0, 0.0]
-
-        maxErrorSide = max(xErrorWeight, yErrorWeight)
-        ErrorWeightRatio = maxErrorSide / totalError
-
-        if xErrorWeight > yErrorWeight:
-            WeightDistancex = StraightDistancex * (1.0 - ErrorWeightRatio)
-            WeightDistancey = StraightDistancey * ErrorWeightRatio
-        elif xErrorWeight < yErrorWeight:
-            WeightDistancex = StraightDistancex * ErrorWeightRatio
-            WeightDistancey = StraightDistancey * (1.0 - ErrorWeightRatio)
+            # Dead-center target: both axes equally trustworthy
+            WeightedDistance = (StraightDistancex + StraightDistancey) / 2.0
         else:
-            WeightDistancex = StraightDistancex * 0.5
-            WeightDistancey = StraightDistancey * 0.5
+            maxErrorSide = max(xErrorWeight, yErrorWeight)
+            ErrorWeightRatio = maxErrorSide / totalError
 
-        WeightedDistance = WeightDistancex + WeightDistancey
+            if xErrorWeight > yErrorWeight:
+                WeightDistancex = StraightDistancex * (1.0 - ErrorWeightRatio)
+                WeightDistancey = StraightDistancey * ErrorWeightRatio
+            elif xErrorWeight < yErrorWeight:
+                WeightDistancex = StraightDistancex * ErrorWeightRatio
+                WeightDistancey = StraightDistancey * (1.0 - ErrorWeightRatio)
+            else:
+                WeightDistancex = StraightDistancex * 0.5
+                WeightDistancey = StraightDistancey * 0.5
 
-        if abs(CenterErrorx) < 1e-9 or abs(CenterErrory) < 1e-9:
-            return [0.0, 0.0, float(WeightedDistance), float(WeightedDistance)]
+            WeightedDistance = WeightDistancex + WeightDistancey
 
-        OffsetDistancex = WeightedDistance / (FocalLength / CenterErrorx)
-        OffsetDistancey = WeightedDistance / (FocalLength / CenterErrory)
+        OffsetDistancex = WeightedDistance * CenterErrorx / self.fx
+        OffsetDistancey = WeightedDistance * CenterErrory / self.fy
 
         CombinedOffset = np.hypot(OffsetDistancex, OffsetDistancey)
         FinalDistance = np.hypot(WeightedDistance, CombinedOffset)
@@ -202,7 +313,11 @@ class PoseEstimationNode(Node):
         # Calculate ranging for coupler using ranging_function
         if coupler_det is not None:
             x1c, y1c, x2c, y2c = self.extract_bbox_corners(coupler_det)
-            coupler_out = self.ranging_function(x1c, y1c, x2c, y2c, n=1)
+            coupler_out = self.ranging_function(
+                x1c, y1c, x2c, y2c, self.CLASS_COUPLER
+            )
+            if self.use_attitude_correction and self.have_attitude:
+                coupler_out = self.apply_attitude_correction(coupler_out)
             coupler_out = self.apply_pc_and_norm(coupler_out)
             self.get_logger().debug(
                 f"Coupler: x={coupler_out[0]:.2f}, y={coupler_out[1]:.2f}, "
@@ -212,7 +327,11 @@ class PoseEstimationNode(Node):
         # Calculate ranging for drogue using ranging_function
         if drogue_det is not None:
             x1d, y1d, x2d, y2d = self.extract_bbox_corners(drogue_det)
-            drogue_out = self.ranging_function(x1d, y1d, x2d, y2d, n=2)
+            drogue_out = self.ranging_function(
+                x1d, y1d, x2d, y2d, self.CLASS_DROGUE
+            )
+            if self.use_attitude_correction and self.have_attitude:
+                drogue_out = self.apply_attitude_correction(drogue_out)
             drogue_out = self.apply_pc_and_norm(drogue_out)
             self.get_logger().debug(
                 f"Drogue: x={drogue_out[0]:.2f}, y={drogue_out[1]:.2f}, "

@@ -1,0 +1,11 @@
+# Disable USB runtime power management for Luxonis OAK / Intel Movidius
+# devices (vendor 03e7). The tegra-xusb link otherwise enters autosuspend /
+# U1/U2 low-power states between XLink transfers, which showed up as
+# multi-second stereo-frame outages in the 2026-07-07 flight bags
+# ("Disable of device-initiated U1 failed" at teardown in syslog).
+#
+# Install:
+#   sudo cp services/99-oak-usb-power.rules /etc/udev/rules.d/
+#   sudo udevadm control --reload-rules
+# then replug the camera (or reboot).
+ACTION=="add", SUBSYSTEM=="usb", ATTR{idVendor}=="03e7", TEST=="power/control", ATTR{power/control}="on"
