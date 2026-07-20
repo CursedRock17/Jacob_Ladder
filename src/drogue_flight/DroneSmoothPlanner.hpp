@@ -14,22 +14,12 @@
 #include <Eigen/Geometry>
 
 #include <string>
-#include <vector>
 
 namespace drogue_flight
 {
 
 inline constexpr char kDroneSmoothPlannerModeName[] = "DroneSmoothPlanner";
 inline constexpr bool kDroneSmoothPlannerDebugOutput = true;
-
-// Single point along the S-curve trajectory sent to PX4 each update tick
-struct Waypoint {
-	Eigen::Vector3f position;
-	Eigen::Vector3f velocity;
-	Eigen::Vector3f acceleration;
-	float yaw;
-	float yaw_rate;
-};
 
 class DroneSmoothPlanner : public px4_ros2::ModeBase
 {
@@ -45,8 +35,8 @@ private:
 	enum class State {
 		Takeoff,    // Optical-flow init, then climb to takeoff_height while holding XY
 		Search,     // Hold position, wait for drogue detection
-		Approach,   // Follow S-curve waypoints toward drogue
-		Hover,      // Hold position near drogue before completing
+		Approach,   // Drive toward the standoff point offset from the drogue
+		Hover,      // Hold position at the standoff point before completing
 		Finished    // Signal success back to executor
 	};
 
@@ -64,18 +54,15 @@ private:
 	// valid drogue pose or attitude is available yet.
 	bool drogueTargetNed(Eigen::Vector3f& target_ned) const;
 
-	// S-curve trajectory generation
-	void generateTrajectoryToDrogue();
-	std::vector<Eigen::Vector3f> generateSCurveWaypoints(
-		const Eigen::Vector3f& start, const Eigen::Vector3f& end, int num_points);
-	void generateSCurveVelocityProfile(
-		float total_distance, int num_samples, float dt,
-		std::vector<float>& v_out, std::vector<float>& a_out);
+	// Standoff point we actually fly to: the drogue's altitude, held back by
+	// drogue_standoff_m of *horizontal* separation along the drone->drogue bearing.
+	// This is what keeps the vehicle from flying into the drogue. Returns false for
+	// the same reasons drogueTargetNed() does.
+	bool drogueStandoffNed(Eigen::Vector3f& standoff_ned) const;
 
 	// Helpers
-	float computeDistance(const Eigen::Vector3f& a, const Eigen::Vector3f& b) const;
-	Eigen::Vector3f computeDirection(const Eigen::Vector3f& a, const Eigen::Vector3f& b) const;
-	void publishPathVisualization();
+	void publishPathVisualization(const Eigen::Vector3f& from, const Eigen::Vector3f& standoff,
+		const Eigen::Vector3f& drogue);
 	void switchToState(State state);
 	std::string stateName(State state) const;
 
@@ -93,8 +80,6 @@ private:
 	std::shared_ptr<px4_ros2::TrajectorySetpointType> _trajectory_setpoint;
 
 	State _state = State::Takeoff;
-	std::vector<Waypoint> _path;  // Current S-curve trajectory
-	int _path_index = 0;          // Next waypoint to track
 
 	// Takeoff climb: captured at activation so the climb is relative to arm position
 	Eigen::Vector3f _base_position = Eigen::Vector3f::Zero();     // NED pose at activation
@@ -110,11 +95,6 @@ private:
 	bool _drogue_valid = false;
 	rclcpp::Time _drogue_timestamp{};
 
-	// Replan bookkeeping: the NED target and time of the last generated path, used
-	// to gate replanning so we only regenerate on a fresh, sufficiently-moved detection
-	Eigen::Vector3f _last_plan_target_ned = Eigen::Vector3f::Zero();
-	rclcpp::Time _last_plan_time{};
-
 	// Hover state
 	Eigen::Vector3f _hover_position = Eigen::Vector3f::Zero();
 	rclcpp::Time _hover_start_time{};
@@ -126,13 +106,10 @@ private:
 	float _param_takeoff_height = 1.75f;      // Final climb height above arm position [m]
 	float _param_climb_rate = 0.3f;           // Vertical climb speed [m/s]
 	float _param_takeoff_reached_tol = 0.10f; // Altitude tolerance to finish climb [m]
-	int _param_num_waypoints = 10;            // Number of points along the S-curve
-	float _param_s_curve_steepness = 4.0f;    // tanh steepness — higher = sharper transition
-	float _param_waypoint_tolerance_m = 0.15f; // Distance to consider a waypoint reached
-	float _param_max_velocity = 0.5f;          // Velocity clamp for the profile [m/s]
-	float _param_max_acceleration = 0.35f;     // Acceleration clamp for the profile [m/s^2]
-	float _param_replan_threshold = 0.35f;     // Replan if the NED target moves more than this [m]
-	float _param_replan_min_interval = 0.5f;   // Minimum seconds between replans (rate limit)
+	float _param_drogue_standoff_m = 3.0f;     // Horizontal standoff kept from the drogue [m]
+	float _param_carrot_lead_time = 1.0f;      // Setpoint lead ahead of the vehicle [s]
+	float _param_waypoint_tolerance_m = 0.15f; // Distance to consider the standoff point reached
+	float _param_max_velocity = 0.5f;          // Approach speed cap [m/s]
 	float _param_camera_pitch_deg = 0.0f;      // Forward cam mount pitch, +ve = tilted down [deg]
 	float _param_hover_duration = 1.5f;        // How long to hover at drogue before completing [s]
 	float _param_drogue_timeout = 3.0f;        // Max age of drogue pose before considered lost [s]

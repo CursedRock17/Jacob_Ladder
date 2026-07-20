@@ -43,13 +43,10 @@ void DroneSmoothPlanner::loadParameters()
 	_node.declare_parameter<float>("takeoff_height", 1.75f);
 	_node.declare_parameter<float>("climb_rate", 0.3f);
 	_node.declare_parameter<float>("takeoff_reached_tol", 0.10f);
-	_node.declare_parameter<int>("num_waypoints", 10);
-	_node.declare_parameter<float>("s_curve_steepness", 4.0f);
+	_node.declare_parameter<float>("drogue_standoff_m", 3.0f);
+	_node.declare_parameter<float>("carrot_lead_time", 1.0f);
 	_node.declare_parameter<float>("waypoint_tolerance_m", 0.15f);
 	_node.declare_parameter<float>("max_velocity", 0.5f);
-	_node.declare_parameter<float>("max_acceleration", 0.35f);
-	_node.declare_parameter<float>("replan_threshold", 0.35f);
-	_node.declare_parameter<float>("replan_min_interval", 0.5f);
 	_node.declare_parameter<float>("camera_pitch_deg", 0.0f);
 	_node.declare_parameter<float>("hover_duration", 1.5f);
 	_node.declare_parameter<float>("drogue_timeout", 3.0f);
@@ -60,13 +57,10 @@ void DroneSmoothPlanner::loadParameters()
 	_node.get_parameter("takeoff_height", _param_takeoff_height);
 	_node.get_parameter("climb_rate", _param_climb_rate);
 	_node.get_parameter("takeoff_reached_tol", _param_takeoff_reached_tol);
-	_node.get_parameter("num_waypoints", _param_num_waypoints);
-	_node.get_parameter("s_curve_steepness", _param_s_curve_steepness);
+	_node.get_parameter("drogue_standoff_m", _param_drogue_standoff_m);
+	_node.get_parameter("carrot_lead_time", _param_carrot_lead_time);
 	_node.get_parameter("waypoint_tolerance_m", _param_waypoint_tolerance_m);
 	_node.get_parameter("max_velocity", _param_max_velocity);
-	_node.get_parameter("max_acceleration", _param_max_acceleration);
-	_node.get_parameter("replan_threshold", _param_replan_threshold);
-	_node.get_parameter("replan_min_interval", _param_replan_min_interval);
 	_node.get_parameter("camera_pitch_deg", _param_camera_pitch_deg);
 	_node.get_parameter("hover_duration", _param_hover_duration);
 	_node.get_parameter("drogue_timeout", _param_drogue_timeout);
@@ -85,11 +79,7 @@ void DroneSmoothPlanner::droguePoseCallback(const geometry_msgs::msg::PoseStampe
 
 void DroneSmoothPlanner::onActivate()
 {
-	_path.clear();
-	_path_index = 0;
 	_drogue_valid = false;
-	_last_plan_time = _node.now();
-	_last_plan_target_ned = Eigen::Vector3f::Zero();
 
 	// Capture the arm position so both takeoff stages and XY hold are relative to it.
 	_base_position = _vehicle_local_position->positionNed();
@@ -114,8 +104,6 @@ void DroneSmoothPlanner::onActivate()
 
 void DroneSmoothPlanner::onDeactivate()
 {
-	_path.clear();
-	_path_index = 0;
 }
 
 // Called by the mode framework at the setpoint rate — drives the state machine
@@ -228,24 +216,15 @@ void DroneSmoothPlanner::updateSetpoint(float dt_s)
 		_trajectory_setpoint->updatePosition(hold);
 
 		if (!drogue_expired) {
-			RCLCPP_INFO(_node.get_logger(), "Drogue acquired — generating trajectory");
-			generateTrajectoryToDrogue();
-
-			if (!_path.empty()) {
-				switchToState(State::Approach);
-			}
+			RCLCPP_INFO(_node.get_logger(),
+				"Drogue acquired — approaching to %.2f m standoff",
+				_param_drogue_standoff_m);
+			switchToState(State::Approach);
 		}
 		break;
 	}
 
 	case State::Approach: {
-		RCLCPP_INFO_THROTTLE(_node.get_logger(), *_node.get_clock(), 2000,
-			"[Approach] waypoint %d/%zu | drogue: [%.2f, %.2f, %.2f] | pos: [%.2f, %.2f, %.2f]",
-			_path_index, _path.size(),
-			_drogue_pose.x(), _drogue_pose.y(), _drogue_pose.z(),
-			_vehicle_local_position->positionNed().x(),
-			_vehicle_local_position->positionNed().y(),
-			_vehicle_local_position->positionNed().z());
 		// Fall back to search if detection drops out
 		if (drogue_expired) {
 			RCLCPP_WARN(_node.get_logger(), "Drogue lost — returning to search");
@@ -253,59 +232,64 @@ void DroneSmoothPlanner::updateSetpoint(float dt_s)
 			break;
 		}
 
-		// Replan only when a *fresh* detection has arrived (timestamp advanced past
-		// the last plan), the rate limit has elapsed, and the drogue's absolute NED
-		// target has actually moved past the deadband. This avoids thrashing on
-		// measurement jitter and on our own motion against a stale drogue pose.
-		if (_path_index > 0 && !_path.empty()) {
-			const bool fresh_detection = _drogue_timestamp > _last_plan_time;
-			const bool interval_elapsed =
-				(now - _last_plan_time).seconds() >= _param_replan_min_interval;
-			Eigen::Vector3f target_ned;
-
-			if (fresh_detection && interval_elapsed && drogueTargetNed(target_ned)) {
-				float movement = computeDistance(_last_plan_target_ned, target_ned);
-				if (movement > _param_replan_threshold) {
-					RCLCPP_INFO(_node.get_logger(), "Drogue moved %.2fm — replanning", movement);
-					generateTrajectoryToDrogue();
-				}
-			}
+		// Recompute the standoff target from the latest detection every tick. There is
+		// no precomputed path to invalidate, so no replan gating is needed — the
+		// setpoint simply tracks wherever the drogue currently is.
+		Eigen::Vector3f drogue_ned;
+		Eigen::Vector3f standoff_ned;
+		if (!drogueTargetNed(drogue_ned) || !drogueStandoffNed(standoff_ned)) {
+			// Attitude not ready yet — hold rather than command a bogus setpoint
+			_trajectory_setpoint->updatePosition(_vehicle_local_position->positionNed());
+			break;
 		}
 
-		// Send the next waypoint's full trajectory setpoint to PX4
-		if (_path_index < static_cast<int>(_path.size())) {
-			const auto& wp = _path[_path_index];
+		const Eigen::Vector3f pos = _vehicle_local_position->positionNed();
+		const Eigen::Vector3f to_standoff = standoff_ned - pos;
+		const float distance = to_standoff.norm();
 
-			// Build a combined position + velocity + acceleration + yaw setpoint
-			px4_ros2::TrajectorySetpoint setpoint;
-			setpoint.withPosition(wp.position)
-				.withVelocity(wp.velocity)
-				.withAcceleration(wp.acceleration)
-				.withYaw(wp.yaw)
-				.withYawRate(wp.yaw_rate);
-			_trajectory_setpoint->update(setpoint);
+		RCLCPP_INFO_THROTTLE(_node.get_logger(), *_node.get_clock(), 2000,
+			"[Approach] %.2f m to standoff | drogue NED: [%.2f, %.2f, %.2f] | "
+			"pos: [%.2f, %.2f, %.2f]",
+			distance,
+			drogue_ned.x(), drogue_ned.y(), drogue_ned.z(),
+			pos.x(), pos.y(), pos.z());
 
-			// Advance to the next waypoint once within tolerance
-			Eigen::Vector3f vehicle_pos = _vehicle_local_position->positionNed();
-			float distance = computeDistance(vehicle_pos, wp.position);
-
-			if (distance < _param_waypoint_tolerance_m || _path_index == 0) {
-				_path_index++;
-			}
-		} else {
-			// All waypoints consumed — check remaining distance to drogue
-			float drogue_distance = _drogue_pose.norm();
-
-			if (drogue_distance < _param_waypoint_tolerance_m) {
-				RCLCPP_INFO(_node.get_logger(), "Reached drogue — hovering");
-				_hover_position = _vehicle_local_position->positionNed();
-				_hover_start_time = now;
-				switchToState(State::Hover);
-			} else {
-				// Not close enough, regenerate
-				generateTrajectoryToDrogue();
-			}
+		if (distance < _param_waypoint_tolerance_m) {
+			RCLCPP_INFO(_node.get_logger(),
+				"Reached %.2f m standoff — hovering", _param_drogue_standoff_m);
+			_hover_position = pos;
+			_hover_start_time = now;
+			switchToState(State::Hover);
+			break;
 		}
+
+		// Carrot setpoint: a single normalized waypoint placed one lead-time ahead of
+		// the vehicle along the bearing to the standoff point, never past it. PX4's
+		// position controller closes the loop on this; the velocity feed-forward is
+		// what actually caps approach speed at max_velocity, since offboard setpoints
+		// bypass the mission-mode trajectory shaping and would otherwise be limited
+		// only by MPC_XY_VEL_MAX.
+		const Eigen::Vector3f direction = to_standoff / distance;
+		const float full_lead = _param_max_velocity * _param_carrot_lead_time;
+		const float lead = std::min(full_lead, distance);
+
+		// Taper the feed-forward inside the lead distance so the vehicle settles onto
+		// the standoff point instead of overshooting it toward the drogue.
+		const float speed = (full_lead > 0.0f)
+			? _param_max_velocity * std::min(1.0f, distance / full_lead)
+			: 0.0f;
+
+		// Yaw tracks the drogue itself, not the standoff point, so the camera stays on
+		// target through the whole approach.
+		const float yaw = std::atan2(drogue_ned.y() - pos.y(), drogue_ned.x() - pos.x());
+
+		px4_ros2::TrajectorySetpoint setpoint;
+		setpoint.withPosition(pos + lead * direction)
+			.withVelocity(speed * direction)
+			.withYaw(yaw);
+		_trajectory_setpoint->update(setpoint);
+
+		publishPathVisualization(pos, standoff_ned, drogue_ned);
 		break;
 	}
 
@@ -369,206 +353,62 @@ bool DroneSmoothPlanner::drogueTargetNed(Eigen::Vector3f& target_ned) const
 	return true;
 }
 
-// ── S-Curve Trajectory Generation ──
-
-// Build a full S-curve trajectory from current position to the drogue
-void DroneSmoothPlanner::generateTrajectoryToDrogue()
+// Hold drogue_standoff_m of horizontal separation while matching the drogue's
+// altitude. Backing off purely in the horizontal plane means the vehicle ends up
+// level with the drogue at a fixed lateral gap, rather than short of it along a
+// 3D line that could still put it underneath or above the target.
+bool DroneSmoothPlanner::drogueStandoffNed(Eigen::Vector3f& standoff_ned) const
 {
-	Eigen::Vector3f vehicle_pos = _vehicle_local_position->positionNed();
-
-	// Transform the camera-frame drogue pose into an absolute NED target. This also
-	// guards against a missing drogue pose or an attitude estimate that isn't ready.
-	Eigen::Vector3f end_pos;
-	if (!drogueTargetNed(end_pos)) {
-		RCLCPP_WARN(_node.get_logger(),
-			"Cannot generate trajectory — no drogue pose or attitude estimate yet");
-		return;
+	Eigen::Vector3f drogue_ned;
+	if (!drogueTargetNed(drogue_ned)) {
+		return false;
 	}
 
-	Eigen::Vector3f start_pos = vehicle_pos;
+	const Eigen::Vector3f pos = _vehicle_local_position->positionNed();
+	const Eigen::Vector2f to_drogue_xy(drogue_ned.x() - pos.x(), drogue_ned.y() - pos.y());
+	const float distance_xy = to_drogue_xy.norm();
 
-	// Remember this plan so the Approach replan check can measure real drift
-	_last_plan_target_ned = end_pos;
-	_last_plan_time = _node.now();
+	// Match the drogue's altitude regardless of horizontal geometry
+	standoff_ned.z() = drogue_ned.z();
 
-	// Interpolate positions along a tanh S-curve
-	auto waypoints = generateSCurveWaypoints(start_pos, end_pos, _param_num_waypoints);
-
-	// Sum segment lengths for the velocity profile scaling
-	float total_distance = 0.0f;
-	for (size_t i = 0; i + 1 < waypoints.size(); ++i) {
-		total_distance += computeDistance(waypoints[i], waypoints[i + 1]);
+	if (distance_xy < 1e-3f) {
+		// Directly above or below the drogue — no horizontal bearing to back off
+		// along, so hold current XY and let the altitude match bring us level.
+		standoff_ned.x() = pos.x();
+		standoff_ned.y() = pos.y();
+		return true;
 	}
 
-	// Sigmoid velocity/acceleration profiles scaled to total distance
-	float dt = 1.0f / 20.0f;
-	std::vector<float> v_profile, a_profile;
-	generateSCurveVelocityProfile(total_distance, static_cast<int>(waypoints.size()), dt,
-		v_profile, a_profile);
-
-	// Assemble waypoints with position, velocity, acceleration, and yaw
-	_path.clear();
-	_path.reserve(waypoints.size());
-
-	for (size_t i = 0; i < waypoints.size(); ++i) {
-		Waypoint wp;
-		wp.position = waypoints[i];
-
-		// Unit direction vector along the path at this segment
-		Eigen::Vector3f dir;
-		if (i + 1 < waypoints.size()) {
-			dir = computeDirection(waypoints[i], waypoints[i + 1]);
-		} else if (i > 0) {
-			dir = computeDirection(waypoints[i - 1], waypoints[i]);
-		} else {
-			dir = Eigen::Vector3f::Zero();
-		}
-
-		// Scale profile magnitudes by path direction
-		wp.velocity = v_profile[i] * dir;
-		wp.acceleration = a_profile[i] * dir;
-
-		// Point yaw toward the drogue at every waypoint
-		float dx = end_pos.x() - waypoints[i].x();
-		float dy = end_pos.y() - waypoints[i].y();
-		wp.yaw = std::atan2(dy, dx);
-		wp.yaw_rate = 0.0f;
-
-		_path.push_back(wp);
-	}
-
-	// Finite-difference yaw rate between consecutive waypoints
-	for (size_t i = 0; i < _path.size(); ++i) {
-		float next_yaw = _path[(i + 1) % _path.size()].yaw;
-		float curr_yaw = _path[i].yaw;
-		float diff = next_yaw - curr_yaw;
-
-		// Wrap to [-pi, pi]
-		if (diff < -M_PI) diff += 2.0f * M_PI;
-		if (diff > M_PI) diff -= 2.0f * M_PI;
-
-		_path[i].yaw_rate = diff / dt;
-	}
-
-	// Start tracking from the first waypoint
-	_path_index = 0;
-
-	RCLCPP_INFO(_node.get_logger(), "Generated S-curve: %zu points, %.2fm distance",
-		_path.size(), total_distance);
-
-	publishPathVisualization();
-}
-
-// Interpolate positions along a tanh-based S-curve between start and end
-std::vector<Eigen::Vector3f> DroneSmoothPlanner::generateSCurveWaypoints(
-	const Eigen::Vector3f& start, const Eigen::Vector3f& end, int num_points)
-{
-	std::vector<Eigen::Vector3f> waypoints;
-	waypoints.reserve(num_points);
-
-	for (int i = 0; i < num_points; ++i) {
-		// Normalized parameter [0, 1]
-		float t = static_cast<float>(i) / static_cast<float>(num_points - 1);
-		// tanh maps linear t to an S-shaped blend factor
-		float s = (std::tanh(_param_s_curve_steepness * (t - 0.5f)) + 1.0f) / 2.0f;
-		waypoints.push_back(start + s * (end - start));
-	}
-
-	return waypoints;
-}
-
-// Generate sigmoid-shaped velocity and acceleration profiles for smooth motion
-void DroneSmoothPlanner::generateSCurveVelocityProfile(
-	float total_distance, int num_samples, float dt,
-	std::vector<float>& v_out, std::vector<float>& a_out)
-{
-	v_out.resize(num_samples);
-	a_out.resize(num_samples);
-
-	float T = static_cast<float>(num_samples - 1) * dt;
-	if (T <= 0.0f) {
-		std::fill(v_out.begin(), v_out.end(), 0.0f);
-		std::fill(a_out.begin(), a_out.end(), 0.0f);
-		return;
-	}
-
-	// Raw sigmoid and its first derivative give velocity and acceleration shapes
-	for (int i = 0; i < num_samples; ++i) {
-		float ti = static_cast<float>(i) * dt;
-		float tau = ti / T;
-
-		float exp_term = std::exp(-10.0f * (tau - 0.5f));
-		float s = 1.0f / (1.0f + exp_term);
-
-		// v = ds/dt, a = dv/dt (analytical derivatives of the logistic sigmoid)
-		v_out[i] = (10.0f / T) * s * (1.0f - s);
-		a_out[i] = (100.0f / (T * T)) * s * (1.0f - s) * (1.0f - 2.0f * s);
-	}
-
-	// Trapezoidal integration to find the raw area under the velocity curve
-	float integrated = 0.0f;
-	for (int i = 0; i + 1 < num_samples; ++i) {
-		integrated += (v_out[i] + v_out[i + 1]) / 2.0f * dt;
-	}
-
-	// Rescale so the integrated distance matches the actual path length
-	if (integrated > 0.0f) {
-		float scale = total_distance / integrated;
-		for (int i = 0; i < num_samples; ++i) {
-			v_out[i] *= scale;
-			a_out[i] *= scale;
-		}
-	}
-
-	// Enforce physical limits on the drone
-	for (int i = 0; i < num_samples; ++i) {
-		v_out[i] = std::clamp(v_out[i], 0.0f, _param_max_velocity);
-		a_out[i] = std::clamp(a_out[i], -_param_max_acceleration, _param_max_acceleration);
-	}
+	// Note: when the drone is already closer than the standoff distance this places
+	// the target behind it, so the same setpoint drives a retreat away from the drogue.
+	const Eigen::Vector2f bearing = to_drogue_xy / distance_xy;
+	standoff_ned.x() = drogue_ned.x() - _param_drogue_standoff_m * bearing.x();
+	standoff_ned.y() = drogue_ned.y() - _param_drogue_standoff_m * bearing.y();
+	return true;
 }
 
 // ── Helpers ──
 
-// Euclidean distance between two NED positions
-float DroneSmoothPlanner::computeDistance(const Eigen::Vector3f& a, const Eigen::Vector3f& b) const
+// Publish vehicle -> standoff -> drogue as a nav_msgs::Path for Foxglove, so the
+// standoff gap is visible as the final leg of the line.
+void DroneSmoothPlanner::publishPathVisualization(const Eigen::Vector3f& from,
+	const Eigen::Vector3f& standoff, const Eigen::Vector3f& drogue)
 {
-	return (b - a).norm();
-}
-
-// Unit direction vector from a to b, zero if coincident
-Eigen::Vector3f DroneSmoothPlanner::computeDirection(const Eigen::Vector3f& a, const Eigen::Vector3f& b) const
-{
-	Eigen::Vector3f diff = b - a;
-	float mag = diff.norm();
-	if (mag < 1e-6f) {
-		return Eigen::Vector3f::Zero();
-	}
-	return diff / mag;
-}
-
-// Publish the current S-curve as a nav_msgs::Path for Foxglove
-void DroneSmoothPlanner::publishPathVisualization()
-{
-	if (_path.empty()) return;
-
 	nav_msgs::msg::Path path_msg;
 	path_msg.header.stamp = _node.now();
 	path_msg.header.frame_id = "map";
 
-	// Convert each waypoint to a PoseStamped with yaw encoded in the quaternion
-	for (const auto& wp : _path) {
+	for (const auto& point : {from, standoff, drogue}) {
 		geometry_msgs::msg::PoseStamped pose;
 		pose.header = path_msg.header;
-		pose.pose.position.x = wp.position.x();
-		pose.pose.position.y = wp.position.y();
-		pose.pose.position.z = wp.position.z();
-		pose.pose.orientation.z = std::sin(wp.yaw / 2.0f);
-		pose.pose.orientation.w = std::cos(wp.yaw / 2.0f);
+		pose.pose.position.x = point.x();
+		pose.pose.position.y = point.y();
+		pose.pose.position.z = point.z();
+		pose.pose.orientation.w = 1.0;
 		path_msg.poses.push_back(pose);
 	}
 
 	_path_viz_pub->publish(path_msg);
-	RCLCPP_INFO(_node.get_logger(), "Published path visualization: %zu poses", path_msg.poses.size());
 }
 
 void DroneSmoothPlanner::switchToState(State state)
