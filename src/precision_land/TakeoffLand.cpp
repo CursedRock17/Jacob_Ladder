@@ -27,6 +27,8 @@ TakeoffLandMode::TakeoffLandMode(rclcpp::Node& node)
 	_node.declare_parameter<float>("climb_rate", 0.3f);
 	_node.declare_parameter<float>("delta_position", 0.05f);
 	_node.declare_parameter<float>("hold_duration", 5.0f);
+	_node.declare_parameter<float>("descent_rate", 0.3f);
+	_node.declare_parameter<float>("land_handoff_height", 0.3f);
 
 	_node.get_parameter("optical_flow_height", _optical_flow_height);
 	_node.get_parameter("optical_flow_hold_time", _optical_flow_hold_time);
@@ -34,6 +36,8 @@ TakeoffLandMode::TakeoffLandMode(rclcpp::Node& node)
 	_node.get_parameter("climb_rate", _climb_rate);
 	_node.get_parameter("delta_position", _delta_position);
 	_node.get_parameter("hold_duration", _hold_duration);
+	_node.get_parameter("descent_rate", _descent_rate);
+	_node.get_parameter("land_handoff_height", _land_handoff_height);
 }
 
 void TakeoffLandMode::onActivate()
@@ -48,6 +52,9 @@ void TakeoffLandMode::onActivate()
 	_reached_flow_height = true;
 	_completed_signaled = false;
 	_active = true;
+	// The mode activates at hover height, so the ground is ~target_height
+	// below here (NED: down is +z). Descend to land_handoff_height above it.
+	_descent_target_z = _base_position.z() + _target_height - _land_handoff_height;
 	_state_pub.set("Hover");
 
 	RCLCPP_INFO(_node.get_logger(),
@@ -141,15 +148,49 @@ void TakeoffLandMode::updateSetpoint(float dt_s)
 				.withYaw(0.0f)
 		);
 
-		// Hovered at target for the full duration — signal the executor to land
-		if (!_completed_signaled && _state_elapsed >= _hold_duration) {
-			_completed_signaled = true;
-			_state_pub.set("HoverComplete");
+		// Hovered at target for the full duration — descend before handing
+		// off to land(), which drops at MPC_LAND_SPEED (min 0.6 m/s).
+		if (_state_elapsed >= _hold_duration) {
+			_state = TakeoffState::Descending;
+			_state_elapsed = 0.0f;
+			_state_pub.set("Descending");
 			RCLCPP_INFO(_node.get_logger(),
-				"Hover complete (%.1f s at target) — signaling completion", _hold_duration);
+				"Hover complete (%.1f s at target) — descending at %.1f m/s to %.1f m before land()",
+				_hold_duration, _descent_rate, _land_handoff_height);
+		}
+		break;
+
+	case TakeoffState::Descending: {
+		const float current_z = _vehicle_local_position->positionNed().z();
+		RCLCPP_INFO_THROTTLE(_node.get_logger(), *_node.get_clock(), 2000,
+			"[Descending] height: %.2f m | handoff at: %.2f m",
+			-current_z, -_descent_target_z);
+
+		// Ramp the setpoint downward (NED: +z), clamped at the handoff point
+		_hold_position.z() += _descent_rate * dt_s;
+		if (_hold_position.z() >= _descent_target_z) {
+			_hold_position.z() = _descent_target_z;
+		}
+
+		const bool at_handoff = current_z >= _descent_target_z - _delta_position;
+		_trajectory_setpoint->update(
+			px4_ros2::TrajectorySetpoint{}
+				.withPosition(_hold_position)
+				.withVelocityZ(at_handoff ? 0.0f : _descent_rate)
+				.withYaw(0.0f)
+		);
+
+		// Reached the handoff height — let the executor's land() finish the
+		// last stretch so PX4's land detector owns the touchdown.
+		if (!_completed_signaled && at_handoff) {
+			_completed_signaled = true;
+			_state_pub.set("DescentComplete");
+			RCLCPP_INFO(_node.get_logger(),
+				"Descent complete (%.2f m) — signaling completion for land()", -current_z);
 			ModeBase::completed(px4_ros2::Result::Success);
 		}
 		break;
+	}
 	}
 }
 

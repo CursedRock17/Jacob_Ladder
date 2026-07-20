@@ -36,7 +36,10 @@ tmux send-keys -t $SESSION:"cuVSLAM" "ros2 launch oak_d_visual_odometry cuvslam_
 # Window 4: OAK-D Lite Camera Node — RETIRED 2026-07-16. The Lite was removed
 # from the airframe; the cuVSLAM node (window 3) now publishes the OAK-D S2's
 # CAM_A stream on /front/camera/image_raw + /front/camera/camera_info
-# (see rgb_topic in cuvslam_params.yaml). Re-enable this if the Lite returns.
+# (see rgb_topic in cuvslam_params.yaml). If the Lite returns, re-enable this
+# AND revert rgb_topic/rgb_camera_info_topic in cuvslam_params.yaml to
+# /rgb/image + /rgb/camera_info — otherwise both cameras publish on
+# /front/camera/image_raw at once.
 echo "[4/9] Camera Node retired (front camera now served by cuVSLAM window)..."
 tmux new-window -t $SESSION -n "Camera Node"
 #tmux send-keys -t $SESSION:"Camera Node" "ros2 run depthai_ros_driver_v3 driver_node --ros-args -p driver.i_device_id:=18443010B17F0C1300 -r /driver/rgb/image_raw:=/front/camera/image_raw -r /driver/rgb/camera_info:=/front/camera/camera_info" Enter

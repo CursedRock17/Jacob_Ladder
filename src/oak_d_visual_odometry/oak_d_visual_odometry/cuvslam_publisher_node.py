@@ -35,6 +35,7 @@ import depthai as dai
 import numpy as np
 
 from cv_bridge import CvBridge
+from diagnostic_msgs.msg import DiagnosticArray, DiagnosticStatus, KeyValue
 from geometry_msgs.msg import PoseStamped, TransformStamped
 from sensor_msgs.msg import CameraInfo, Image, Imu
 from tf2_ros import TransformBroadcaster
@@ -130,11 +131,23 @@ class CuVslamPublisherNode(Node):
         self._reset_counter = 0
         self._stable_frames = 0
         self._last_landmarks_3d: int | None = None
+        self._last_capture_latency_ms: float | None = None
         self._warned_sample_clock = False
         self._last_world_position = None
         self._last_world_timestamp_ns = None
         self._track_stats_start = time.monotonic()
         self._track_stats = {"n": 0, "sum_ms": 0.0, "max_ms": 0.0, "slow": 0, "gaps": 0}
+
+        # Cumulative publish counters -> measured Hz on ~/diagnostics. These
+        # exist because a viewer's apparent rate is not the node's rate:
+        # foxglove_bridge throttles under WiFi bandwidth pressure, so Foxglove
+        # can show 10 Hz while /slam/odometry genuinely runs at 40. This is
+        # counted at the publish() call itself, upstream of any transport.
+        self._rate_counts = dict.fromkeys(
+            ("tracked", "odom", "px4", "rgb", "features"), 0
+        )
+        self._rate_last_counts = dict(self._rate_counts)
+        self._rate_last_time = time.monotonic()
 
         self._stop = threading.Event()
         self._worker = threading.Thread(target=self._pipeline_loop, daemon=True)
@@ -151,6 +164,14 @@ class CuVslamPublisherNode(Node):
             PoseStamped, self._odom_topic, PUBLISHER_QUEUE_SIZE
         )
         self.tf_broadcaster = TransformBroadcaster(self)
+
+        # Measured rates, published at 1 Hz on ~/diagnostics so they stay
+        # readable in Foxglove even when the bridge is dropping the 40 Hz
+        # pose stream (view it with the Diagnostics panel).
+        self.diagnostics_publisher = self.create_publisher(
+            DiagnosticArray, "~/diagnostics", PUBLISHER_QUEUE_SIZE
+        )
+        self.create_timer(1.0, self._publish_diagnostics)
 
         self.imu_publisher = None
         if self._publish_imu:
@@ -230,6 +251,10 @@ class CuVslamPublisherNode(Node):
         self.declare_parameter("publish_stereo_images", False)
         self.declare_parameter("publish_features", True)
         self.declare_parameter("feature_point_radius", 3)
+        # Cap the feature-overlay rate: the overlay costs a colorspace
+        # convert + draw + 768 KB publish per frame, in the same thread as
+        # track(). 10 Hz is plenty for a debug view.
+        self.declare_parameter("features_max_fps", 10.0)
         self.declare_parameter("publish_imu", True)
         self.declare_parameter("enable_imu_fusion", False)
         self.declare_parameter("imu_rate_hz", 200)
@@ -387,6 +412,10 @@ class CuVslamPublisherNode(Node):
         self._feature_point_radius = max(
             1, int(self.get_parameter("feature_point_radius").value)
         )
+        self._features_min_period_ns = int(
+            1e9 / max(float(self.get_parameter("features_max_fps").value), 0.1)
+        )
+        self._last_features_pub_ns = 0
         self._publish_imu = bool(self.get_parameter("publish_imu").value)
         self._enable_imu_fusion = bool(self.get_parameter("enable_imu_fusion").value)
         self._imu_rate_hz = int(self.get_parameter("imu_rate_hz").value)
@@ -641,7 +670,12 @@ class CuVslamPublisherNode(Node):
             (self._width, self._height), type=dai.ImgFrame.Type.GRAY8
         ).link(sync.inputs["right"])
 
-        return sync.out.createOutputQueue(maxSize=4, blocking=False)
+        # Shallow queue on purpose. This is non-blocking, so whenever track()
+        # is slower than the camera the queue sits FULL and every extra slot
+        # is pure added age on the pose EKF2 finally sees (4 slots at 30 fps =
+        # 133 ms of it). Keeping 2 bounds that at one frame period of slack
+        # while still absorbing a single late frame.
+        return sync.out.createOutputQueue(maxSize=2, blocking=False)
 
     def _create_rgb_queue(self, pipeline):
         if not self._publish_rgb:
@@ -1109,6 +1143,7 @@ class CuVslamPublisherNode(Node):
     def _record_track_time(self, duration_ms: float, tracker=None):
         stats = self._track_stats
         stats["n"] += 1
+        self._rate_counts["tracked"] += 1
         stats["sum_ms"] += duration_ms
         stats["max_ms"] = max(stats["max_ms"], duration_ms)
         if duration_ms > self._slow_track_warn_ms:
@@ -1127,6 +1162,11 @@ class CuVslamPublisherNode(Node):
                 f"n={stats['n']} mean={stats['sum_ms'] / stats['n']:.1f}ms "
                 f"max={stats['max_ms']:.1f}ms slow={stats['slow']} "
                 f"frame_gaps={stats['gaps']}{self._stereo_health(tracker)}"
+                + (
+                    f" ev_lat={self._last_capture_latency_ms:.0f}ms"
+                    if self._last_capture_latency_ms is not None
+                    else ""
+                )
             )
             self._track_stats_start = now
             self._track_stats = {
@@ -1136,6 +1176,81 @@ class CuVslamPublisherNode(Node):
                 "slow": 0,
                 "gaps": 0,
             }
+
+    def _publish_diagnostics(self):
+        """Publish measured publish rates at 1 Hz.
+
+        Rates are counted at the publish() call, so they are the node's true
+        output rate -- independent of what any viewer manages to receive. A
+        rate here that matches camera_fps while Foxglove shows less means the
+        bridge is dropping messages, not that the node is slow.
+        """
+        now = time.monotonic()
+        elapsed = now - self._rate_last_time
+        if elapsed < 1e-3:
+            return
+
+        rates = {
+            name: (count - self._rate_last_counts[name]) / elapsed
+            for name, count in self._rate_counts.items()
+        }
+        self._rate_last_counts = dict(self._rate_counts)
+        self._rate_last_time = now
+
+        status = DiagnosticStatus()
+        status.name = "oak_d_visual_odometry: rates"
+        status.hardware_id = str(self.get_parameter("device_id").value or "any")
+
+        # camera_fps is the contract: the stereo pipeline should deliver every
+        # frame requested. Sustained shortfall means the device-wide frame
+        # budget is oversubscribed (see the README "Frame rate" section).
+        shortfall = self._camera_fps - rates["tracked"]
+        if shortfall > 0.2 * max(self._camera_fps, 1.0):
+            status.level = DiagnosticStatus.ERROR
+            status.message = (
+                f"stereo {rates['tracked']:.1f} Hz vs {self._camera_fps:.0f} "
+                "requested; device frame budget oversubscribed"
+            )
+        elif (
+            self._last_capture_latency_ms is not None
+            and self._last_capture_latency_ms > 150.0
+        ):
+            status.level = DiagnosticStatus.WARN
+            status.message = (
+                f"capture->publish latency {self._last_capture_latency_ms:.0f} ms"
+            )
+        else:
+            status.level = DiagnosticStatus.OK
+            status.message = f"tracking at {rates['tracked']:.1f} Hz"
+
+        values = [
+            ("tracked_fps", f"{rates['tracked']:.2f}"),
+            ("camera_fps_requested", f"{self._camera_fps:.1f}"),
+            ("odometry_fps", f"{rates['odom']:.2f}"),
+            ("px4_fps", f"{rates['px4']:.2f}"),
+            ("rgb_fps", f"{rates['rgb']:.2f}"),
+            ("rgb_fps_requested", f"{self._rgb_fps:.1f}"),
+            ("features_fps", f"{rates['features']:.2f}"),
+            (
+                "ev_latency_ms",
+                "n/a"
+                if self._last_capture_latency_ms is None
+                else f"{self._last_capture_latency_ms:.1f}",
+            ),
+            (
+                "landmarks_3d",
+                "n/a"
+                if self._last_landmarks_3d is None
+                else str(self._last_landmarks_3d),
+            ),
+            ("reset_counter", str(self._reset_counter)),
+        ]
+        status.values = [KeyValue(key=k, value=v) for k, v in values]
+
+        msg = DiagnosticArray()
+        msg.header.stamp = self.get_clock().now().to_msg()
+        msg.status = [status]
+        self.diagnostics_publisher.publish(msg)
 
     def _stereo_health(self, tracker) -> str:
         """2D-track vs triangulated-landmark counts for the stats log.
@@ -1258,6 +1373,7 @@ class CuVslamPublisherNode(Node):
         pose_msg.pose.orientation.z = float(rotation[2])
         pose_msg.pose.orientation.w = float(rotation[3])
         self.odometry_publisher.publish(pose_msg)
+        self._rate_counts["odom"] += 1
 
         tf_msg = TransformStamped()
         tf_msg.header.stamp = stamp
@@ -1336,6 +1452,7 @@ class CuVslamPublisherNode(Node):
         msg.reset_counter = int(self._reset_counter % 256)
         msg.quality = self._px4_quality()
         self.px4_publisher.publish(msg)
+        self._rate_counts["px4"] += 1
 
     def _px4_timestamp_sample_us(
         self, ros_timestamp_ns: int, host_capture_ns: int | None
@@ -1355,6 +1472,7 @@ class CuVslamPublisherNode(Node):
             time.monotonic_ns() - host_capture_ns if host_capture_ns is not None else -1
         )
         if 0 <= latency_ns < 500_000_000:
+            self._last_capture_latency_ms = latency_ns * 1e-6
             return int((ros_timestamp_ns - latency_ns) // 1000)
         if not self._warned_sample_clock:
             self._warned_sample_clock = True
@@ -1474,9 +1592,18 @@ class CuVslamPublisherNode(Node):
         """
         if self.features_image_publisher is None:
             return
+        # Skip entirely when nothing subscribes (e.g. foxglove stack down),
+        # and rate-limit: the overlay is a debug view, not flight data, and
+        # this method shares a thread with track().
+        if self.features_image_publisher.get_subscription_count() == 0:
+            return
+        now_ns = time.monotonic_ns()
+        if now_ns - self._last_features_pub_ns < self._features_min_period_ns:
+            return
+        self._last_features_pub_ns = now_ns
 
-        # Always publish the frame (even with zero features or a read error) so
-        # the topic keeps streaming and stays discoverable in Foxglove, and so
+        # Publish the frame (even with zero features or a read error) so the
+        # topic keeps streaming and stays discoverable in Foxglove, and so
         # the live downward view is available for debugging tracking dropouts.
         try:
             observations = tracker.get_last_observations(0)
@@ -1503,6 +1630,7 @@ class CuVslamPublisherNode(Node):
         msg.header.stamp = stamp
         msg.header.frame_id = self._left_frame_id
         self.features_image_publisher.publish(msg)
+        self._rate_counts["features"] += 1
 
         if (
             self._left_camera_info is not None
@@ -1558,6 +1686,7 @@ class CuVslamPublisherNode(Node):
         msg.header.stamp = self._now()
         msg.header.frame_id = self._rig_frame_id
         self.rgb_publisher.publish(msg)
+        self._rate_counts["rgb"] += 1
 
         if (
             self._rgb_camera_info is not None

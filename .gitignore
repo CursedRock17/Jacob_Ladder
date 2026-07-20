@@ -34,4 +34,4 @@ xfer-linux-aarch64-musl
 # DepthAI generated caches and crash dumps
 .depthai_cached_models/
 
-
+rosbag2*/

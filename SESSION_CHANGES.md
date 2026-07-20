@@ -115,3 +115,92 @@
 - std_msgs added to package.xml/CMakeLists; '.*/state$' added to the
   foxglove_wifi.sh whitelist. View with a State Transitions panel on
   "/TakeoffLand/state.data" (works live and in bag replay).
+
+## First successful VIO flight — configuration locked in (2026-07-16)
+- Flight result: position lock, ~5 cm drift, takeoff_land mode flew (1 m,
+  10 s hold, hard-ish landing). EKF2_EV_CTRL=15 required (velocity fusion
+  kills the 10-20 m drift; yaw fusion needed to arm in Position mode).
+- config/params/v1_16_0_oakd_vio.params: EKF2_EV_CTRL 13 -> 15 so reloading
+  the snapshot can't regress the working config.
+- New config/params/README.md: file index + flight-proven VIO parameter
+  rationale + open tuning list (X/Y hold oscillation, MPC_LAND_SPEED).
+- oak_d_visual_odometry README PX4 Notes: flight-proven EKF2 paragraph.
+
+## TakeoffLand: slow descent before land() (2026-07-16)
+- New Descending state: after the timed hover, the mode ramps its own
+  setpoints down at descent_rate (0.3 m/s) to land_handoff_height (0.3 m
+  above estimated ground), THEN signals completion so the executor's native
+  land() only covers the final touchdown (PX4 land detector still owns it).
+  Motivation: MPC_LAND_SPEED has a 0.6 m/s floor, too hard for this quad.
+- New params in cfg/takeoff_land_params.yaml: descent_rate,
+  land_handoff_height. State topic now shows ... Hover -> Descending ->
+  DescentComplete -> Landing ...
+
+## EV latency measured across all bags — EV_DELAY question answered (2026-07-17)
+- Cross-correlated gyro vs /slam/odometry angular rate in every flight_logs
+  bag: current pipeline capture->publish latency is ~380-450 ms (node's
+  timestamp_sample claim of ~435 ms independently CONFIRMED honest).
+  fifth_flight (July 9, OAK-D Lite era, old code) measured 43 ms — the
+  regression came with the current config (suspects: CAM_A 30 fps through
+  the VIO node, features publishing, detector subscription load).
+- EKF2_EV_DELAY should stay ~5 ms (timestamp_sample already carries the
+  latency; tuning it was never the fix). EKF2_DELAY_MAX=200 ms is SMALLER
+  than the 435 ms sample age — fusion mis-registration during motion.
+  Stopgap: raise EKF2_DELAY_MAX to 500. Real fix: find the ~13-frame
+  backlog. Node stats line now prints ev_lat=<ms> for live measurement.
+- Onboard-latency pass on the cuVSLAM node:
+  - `/features/image` overlay is now skipped when nobody is subscribed and
+    otherwise rate-capped by the new `features_max_fps` param (default 10).
+    It cost a colorspace convert + per-feature draws + a ~768 KB publish on
+    every frame, all inside the tracking loop.
+  - Stereo sync output queue maxSize 4 -> 2. The queue is non-blocking, so
+    when track() is slower than the camera it sits full and each extra slot
+    is pure added pose age (4 slots at 30 fps = 133 ms of the 435).
+  - `camera_fps` 45 -> 40 and `rgb_fps` 30 -> 10, from a measured sweep
+    (2026-07-20). ROOT CAUSE OF THE 435 ms LATENCY FOUND: the OAK-D S2 has a
+    device-wide budget of ~50 delivered frames/s SHARED between the stereo
+    pair and CAM_A. It was never the sensors (OV7251 does 640x480 @ 117 fps)
+    and never host compute (track() means 4-6 ms = ~200 Hz ceiling). The old
+    45+30=75 request oversubscribed the device, so the sync queue backlogged
+    and poses arrived ~400 ms stale.
+      60+30=90 -> 22.4 Hz / 405 ms      45+10=55 -> 44.0 Hz / 242 ms
+      60+10=70 -> 38.4 Hz / 245 ms      40+10=50 -> 40.8 Hz /  60 ms  <-- set
+      50+10=60 -> 42.5 Hz / 222 ms      30+10=40 -> 30.0 Hz /  39 ms
+    40/10 gives the full requested stereo rate, frame_gaps=0, and ev_lat back
+    down to the 52+-27 ms fifth_flight baseline. Latency was preferred over
+    the marginally higher 44 Hz at 45+10 because ev_lat is what
+    EKF2_DELAY_MAX must cover.
+  - Measured non-findings, recorded so they are not re-litigated:
+    `publish_features` and `publish_imu` cost essentially nothing (55.3 and
+    48.4 Hz with rgb off, vs 54.6 Hz with all three off). The feature-overlay
+    throttle above is still worth keeping but it was NOT the bottleneck --
+    RGB alone accounted for the entire 55 Hz -> 22 Hz collapse.
+  - README gained a "Frame rate" section with the measurement table and the
+    verification procedure (n/10 must equal camera_fps, frame_gaps 0,
+    ev_lat < ~100 ms).
+  - Confirmed on the shipped config: n=400-408/10s (exactly camera_fps=40),
+    frame_gaps=0, and ZERO DepthAI "Delta between frames" warnings (was 281
+    in 45 s at 60/30). ev_lat settles to 33-45 ms, but only after ~20 s --
+    the first two stats windows still read ~220 ms. Let the node settle
+    before arming.
+  - BUILD GOTCHA (hit and documented in the package README): build with
+    `python3 -m colcon build ... --symlink-install`, NOT `/usr/bin/colcon`.
+    The system colcon's `#!/usr/bin/python3` shebang propagates into the
+    generated console script, which then cannot import depthai/cuvslam (venv
+    only) -> ModuleNotFoundError at launch. Also do NOT `source
+    .venv/bin/activate` first; that writes metadata the launch interpreter
+    cannot find (PackageNotFoundError). The venv is on PATH from the profile.
+- Node now publishes measured rates on `~/diagnostics`
+  (`diagnostic_msgs/DiagnosticArray`, 1 Hz) — added because Foxglove showed
+  "~10 Hz" while the node was genuinely at 40. Counted at the publish() call,
+  upstream of any transport, so it is immune to bridge throttling. Keys:
+  tracked_fps, camera_fps_requested, odometry_fps, px4_fps, rgb_fps,
+  features_fps, ev_latency_ms, landmarks_3d, reset_counter. Status goes ERROR
+  on >20% stereo shortfall vs camera_fps, WARN on ev_latency_ms > 150.
+  Added `diagnostic_msgs` to package.xml and `.*/diagnostics$` to the
+  foxglove_wifi.sh whitelist.
+- Verified true rates with `ros2 topic hz` (2026-07-20, 40/10 config):
+  /slam/odometry 40.0 Hz, /fmu/in/vehicle_visual_odometry 40.2 Hz,
+  /front/camera/image_raw 7.7 Hz, /features/image 7.3 Hz. The "10 Hz" the
+  operator saw was an image topic and/or bridge throttling, NOT the pose
+  stream. Documented in the README "Reading the real rate" section.

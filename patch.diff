@@ -1,0 +1,33 @@
+Submodule src/px4-ros2-interface-lib contains modified content
+diff --git a/src/px4-ros2-interface-lib/px4_ros2_cpp/include/px4_ros2/components/mode_executor.hpp b/src/px4-ros2-interface-lib/px4_ros2_cpp/include/px4_ros2/components/mode_executor.hpp
+index 26eea92..c7547b7 100644
+--- a/src/px4-ros2-interface-lib/px4_ros2_cpp/include/px4_ros2/components/mode_executor.hpp
++++ b/src/px4-ros2-interface-lib/px4_ros2_cpp/include/px4_ros2/components/mode_executor.hpp
+@@ -132,7 +132,12 @@ public:
+    */
+   bool deferFailsafesSync(bool enabled, int timeout_s = 0);
+ 
++protected:
++  void setSkipMessageCompatibilityCheck() {_skip_message_compatibility_check = true;}
++
+ private:
++  bool _skip_message_compatibility_check{false};
++
+   class ScheduledMode
+   {
+ public:
+diff --git a/src/px4-ros2-interface-lib/px4_ros2_cpp/src/components/mode_executor.cpp b/src/px4-ros2-interface-lib/px4_ros2_cpp/src/components/mode_executor.cpp
+index ed6b56e..d2a9741 100644
+--- a/src/px4-ros2-interface-lib/px4_ros2_cpp/src/components/mode_executor.cpp
++++ b/src/px4-ros2-interface-lib/px4_ros2_cpp/src/components/mode_executor.cpp
+@@ -53,8 +53,8 @@ bool ModeExecutorBase::doRegister()
+ 
+   assert(!_registration->registered());
+ 
+-  if (!waitForFMU(node(), 15s, _topic_namespace_prefix) ||
+-    !messageCompatibilityCheck(node(), {ALL_PX4_ROS2_MESSAGES}, _topic_namespace_prefix))
++  if (!_skip_message_compatibility_check && (!waitForFMU(node(), 15s, _topic_namespace_prefix) ||
++    !messageCompatibilityCheck(node(), {ALL_PX4_ROS2_MESSAGES}, _topic_namespace_prefix)))
+   {
+     return false;
+   }

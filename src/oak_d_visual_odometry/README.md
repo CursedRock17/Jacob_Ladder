@@ -24,7 +24,7 @@ the launch file to start a local bridge instead.
 
 Since the OAK-D Lite was removed (2026-07-16) the S2 is the only camera: its
 CAM_B/CAM_C stereo pair drives cuVSLAM while CAM_A color is published on
-`/front/camera/image_raw` (30 fps) for the YOLO drogue detector — one device,
+`/front/camera/image_raw` (10 fps) for the YOLO drogue detector — one device,
 one process, both pipelines.
 
 ## Python Dependencies
@@ -60,10 +60,25 @@ Unplug and replug the OAK-D after adding the rule.
 
 ## Build
 
+Build through the **venv's** colcon, not the system one:
+
 ```bash
-colcon build --packages-select oak_d_visual_odometry
+python3 -m colcon build --packages-select oak_d_visual_odometry --symlink-install
 source install/setup.bash
 ```
+
+`/usr/bin/colcon` has a `#!/usr/bin/python3` shebang, so it generates console
+scripts pointed at the *system* interpreter — which cannot see `depthai` or
+`cuvslam` (both live only in `.venv`). The node then dies at launch with
+`ModuleNotFoundError: No module named 'depthai'`. Running colcon as
+`python3 -m colcon` with the venv on `PATH` writes
+`#!/usr/bin/env python3` instead, which resolves correctly.
+
+Do **not** `source .venv/bin/activate` before building: that combination
+writes package metadata the launch-time interpreter cannot find, and fails
+differently (`PackageNotFoundError: No package metadata was found for
+oak-d-visual-odometry`). The venv is already on `PATH` from the shell
+profile; no activation is needed.
 
 ## Launch
 
@@ -103,6 +118,7 @@ extrinsics and noise parameters are calibrated.
 | `/rgb/camera_info` | `sensor_msgs/CameraInfo` | CAM_A intrinsics |
 | `/left/image`, `/right/image` | `sensor_msgs/Image` | optional mono debug images |
 | `/features/image` | `sensor_msgs/Image` | left frame with tracked features drawn on it |
+| `~/diagnostics` | `diagnostic_msgs/DiagnosticArray` | measured publish rates + latency at 1 Hz — see [Frame rate](#frame-rate) |
 
 All topic names are parameters. The shipped `cuvslam_params.yaml` renames the
 CAM_A topics to `/front/camera/image_raw` and `/front/camera/camera_info` so
@@ -134,9 +150,10 @@ ros2 run oak_d_visual_odometry cuvslam_publisher_px4_node \
 |---|---|---|
 | `device_id` | `""` | DepthAI deviceId (MXID) to open; empty opens the first available device. The config pins the OAK-D S2 (`1944301041EB1B1300`) so VIO never grabs the OAK-D Lite drogue camera |
 | `width`, `height` | `640`, `480` | Stereo image size requested from DepthAI (the shipped config uses 640x400) |
-| `camera_fps` | `30.0` | CAM_B/CAM_C frame rate for cuVSLAM |
-| `rgb_fps` | `30.0` | CAM_A RGB frame rate (also the drogue detector's input rate) |
+| `camera_fps` | `30.0` | CAM_B/CAM_C frame rate for cuVSLAM (the shipped PX4 config uses `40.0` — read [Frame rate](#frame-rate) before changing it) |
+| `rgb_fps` | `30.0` | CAM_A RGB frame rate, also the drogue detector's input rate (the shipped PX4 config uses `10.0`; every RGB frame costs ~1.1 stereo frames — see [Frame rate](#frame-rate)) |
 | `publish_rgb` | `true` | Publish CAM_A color frames |
+| `features_max_fps` | `10.0` | Rate cap on the `/features/image` debug overlay. The overlay costs a colorspace convert, a draw per feature, and a ~768 KB publish on every frame, all inside the tracking loop; it is also skipped entirely when nobody is subscribed |
 | `publish_stereo_images` | `false` | Publish mono stereo debug images |
 | `publish_imu` | `true` | Publish raw OAK IMU on `/imu/data` |
 | `enable_imu_fusion` | `false` | Feed OAK IMU samples into cuVSLAM (Inertial odometry mode) |
@@ -167,6 +184,80 @@ ros2 run oak_d_visual_odometry cuvslam_publisher_px4_node \
 The PX4 publisher also stops publishing while cuVSLAM reports an invalid
 pose and increments the `VehicleOdometry.reset_counter` when tracking is
 re-acquired, so EKF2 re-references instead of fusing the jump as motion.
+
+## Frame rate
+
+What EKF2 fuses is the rate `/slam/odometry` actually *publishes* and how
+stale each pose is when it arrives — neither follows from `camera_fps`.
+
+**The binding constraint is a device-wide budget of ~50 delivered frames per
+second, shared between the stereo pair and CAM_A.** It is not the sensors
+(the OV7251 stereo pair does 640x480 at 117 fps) and not host compute
+(`track()` means 4–6 ms, a ~200 Hz ceiling). Once `camera_fps + rgb_fps`
+exceeds ~50 the sync queue backlogs, pose age explodes, and the stereo rate
+plateaus or *goes backwards*.
+
+Measured on this rig, 2026-07-20:
+
+| `camera_fps` | `rgb_fps` | total | tracked Hz | `frame_gaps` | `ev_lat` |
+|---|---|---|---|---|---|
+| 30 | 10 | 40 | 30.0 | 0 | 39 ms |
+| **40** | **10** | **50** | **40.8** | **0** | **60 ms** |
+| 40 | 15 | 55 | 40.1 | 0 | 230 ms |
+| 45 | 10 | 55 | 44.0 | 0 | 242 ms |
+| 50 | 10 | 60 | 42.5 | 0 | 222 ms |
+| 60 | 10 | 70 | 38.4 | 17 | 245 ms |
+| 60 | 30 | 90 | 22.4 | 70 | 405 ms |
+
+Latency beats raw rate here, because `ev_lat` is what `EKF2_DELAY_MAX` has to
+cover — a 405 ms pose age against a 200 ms replay buffer is fusion
+mis-registration, which is the failure the 40/10 setting exists to avoid.
+
+### Reading the real rate
+
+**Do not trust a rate read off a Foxglove panel.** foxglove_bridge drops
+messages under WiFi bandwidth pressure, and `foxglove_wifi.sh` republishes
+images through a JPEG encoder, so a panel can show ~10 Hz while
+`/slam/odometry` genuinely runs at 40. Measured on the bench 2026-07-20 with
+the shipped 40/10 config:
+
+| topic | true rate |
+|---|---|
+| `/slam/odometry` | 40.0 Hz |
+| `/fmu/in/vehicle_visual_odometry` | 40.2 Hz |
+| `/front/camera/image_raw` | 7.7 Hz (`rgb_fps` 10) |
+| `/features/image` | 7.3 Hz (`features_max_fps` 10) |
+
+The node publishes ground truth on `~/diagnostics` (a
+`diagnostic_msgs/DiagnosticArray` at 1 Hz) — view it with Foxglove's
+**Diagnostics** panel. Rates are counted at the `publish()` call, upstream of
+any transport, so they are the node's real output regardless of what a viewer
+receives. Keys: `tracked_fps`, `camera_fps_requested`, `odometry_fps`,
+`px4_fps`, `rgb_fps`, `features_fps`, `ev_latency_ms`, `landmarks_3d`,
+`reset_counter`. The status goes ERROR when the stereo rate falls more than
+20 % short of `camera_fps` (the frame budget is oversubscribed) and WARN when
+`ev_latency_ms` exceeds 150.
+
+From a terminal, `ros2 topic hz /slam/odometry` is the other authoritative
+check.
+
+### Verifying a change
+
+Verify any change against the 10 s stats line:
+
+```
+track() stats over 10s: n=... mean=..ms max=..ms slow=.. frame_gaps=.. ... ev_lat=..ms
+```
+
+- `n / 10` must **equal** `camera_fps`. If it is below, the request exceeds
+  the budget — lower it rather than raising it.
+- `frame_gaps` must be `0`.
+- `ev_lat` should stay under ~100 ms.
+- `mean` is track() time; it has never been the limit on this rig.
+
+If `ev_lat` climbs, spend budget rather than adding it: lower `rgb_fps`
+first (it buys roughly 1.1 stereo frames each), then `camera_fps`.
+`publish_features` and `publish_imu` measured free — they are not the lever.
 
 ## Mounting
 
@@ -221,6 +312,13 @@ minus the measured capture->publish latency via DepthAI's host-synced
 transport lag. `quality` scales with the triangulated 3D landmark count
 (2x landmarks, capped at 100) so `EKF2_EV_QMIN` can de-weight marginal
 scenes; it is 100 only when the landmark API is unavailable.
+
+**Flight-proven EKF2 configuration (2026-07-16, forward mount):**
+`EKF2_EV_CTRL = 15` — all four fusion bits are required. Position-only
+fusion drifted 10–20 m (the windowed EV velocity is what pins the drift to
+~5 cm), and without EV yaw PX4 never declares horizontal position stable
+enough to arm in Position mode. See `config/params/README.md` at the repo
+root for the full parameter rationale.
 
 Before flight, use QGroundControl MAVLink Inspector to confirm the received
 ODOMETRY axes:

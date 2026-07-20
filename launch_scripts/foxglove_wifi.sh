@@ -54,7 +54,7 @@ ros2 launch foxglove_bridge foxglove_bridge_launch.xml \
     num_threads:=4 \
     topic_whitelist:="['.*/compressed$', \
 '/detections', '/vision_info', '/tag_detections', \
-'/drogue.*', '/slam/.*', '.*/state$', '/tf', '/tf_static', \
+'/drogue.*', '/slam/.*', '.*/state$', '.*/diagnostics$', '/tf', '/tf_static', \
 '/fmu/out/.*', '/imu/data', \
 '/front/camera/camera_info', \
 '/rosout', '/foxglove_bridge/sysinfo']"

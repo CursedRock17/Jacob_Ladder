@@ -37,7 +37,8 @@ private:
 	enum class TakeoffState {
 		OpticalFlowInit,
 		Climbing,
-		Holding
+		Holding,
+		Descending   // slow setpoint descent to the land() handoff height
 	};
 
 	rclcpp::Node& _node;
@@ -61,6 +62,13 @@ private:
 	float _climb_rate = 0.3f;
 	float _delta_position = 0.05f;
 	float _hold_duration = 5.0f;  // seconds to hover at target before completing
+	// PX4's native land() descends at MPC_LAND_SPEED (min 0.6 m/s — hard on a
+	// small quad). The mode descends itself at descent_rate down to
+	// land_handoff_height above the (estimated) ground, then completes so the
+	// executor's land() only covers the final touchdown + land detection.
+	float _descent_rate = 0.3f;          // m/s — setpoint descent speed
+	float _land_handoff_height = 0.3f;   // meters above ground to hand off to land()
+	float _descent_target_z = 0.0f;      // NED z where the descent completes
 };
 
 // Executor: arms -> hands off to mode (climb + timed hover) -> lands on completion

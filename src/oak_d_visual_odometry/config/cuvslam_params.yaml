@@ -40,8 +40,28 @@ oak_d_cuvslam_px4_publisher:
     device_id: "1944301041EB1B1300"
     width: 640
     height: 400
-    camera_fps: 30.0
-    rgb_fps: 30.0
+    # MEASURED 2026-07-20 on this rig, do not raise casually. The binding
+    # constraint is a DEVICE-WIDE budget of ~50 delivered frames/s shared
+    # across the stereo pair and CAM_A -- NOT the sensors (OV7251 global
+    # shutter does 640x480 at 117 fps) and NOT host compute (track() means
+    # 4-6 ms, a ~200 Hz ceiling). Past ~50 total the sync queue backlogs and
+    # pose age explodes; the stereo rate stops improving or goes backwards.
+    #
+    #   camera_fps + rgb_fps -> tracked Hz / ev_lat
+    #     30 + 10 = 40  ->  30.0 Hz /  39 ms
+    #     40 + 10 = 50  ->  40.8 Hz /  60 ms   <-- best, current setting
+    #     40 + 15 = 55  ->  40.1 Hz / 230 ms
+    #     45 + 10 = 55  ->  44.0 Hz / 242 ms
+    #     50 + 10 = 60  ->  42.5 Hz / 222 ms
+    #     60 + 30 = 90  ->  22.4 Hz / 405 ms   <-- the old 435 ms mystery
+    #
+    # This is what EKF2_DELAY_MAX has to cover, so latency wins over raw
+    # rate. rgb_fps 10 is ample for the drogue detector (YOLO sustains
+    # 15-20 Hz at best). Re-measure with the 10 s "track() stats" line after
+    # any change: n/10 must equal camera_fps, frame_gaps must be 0, and
+    # ev_lat must stay under ~100 ms.
+    camera_fps: 40.0
+    rgb_fps: 10.0
     warmup_frames: 30
     publish_rgb: true
     publish_stereo_images: false
@@ -106,7 +126,10 @@ oak_d_cuvslam_px4_publisher:
     # and re-verify against static gravity via the EEPROM IMU->CAM_A
     # extrinsics (see frames.r_body_from_cam_depression).
     camera_mounting: forward
-    t_body_cam: [0.0, 0.0, 0.0]
+    # Camera lever arm, measured 2026-07-16: 12.5 cm forward of the FC,
+    # centered laterally, 2.5 cm above it (FRD: up is -z). Keep
+    # EKF2_EV_POS_X/Y/Z at 0 — the node applies this arm itself.
+    t_body_cam: [0.125, 0.0, -0.025]
     R_body_cam_override: []
     # Exclude features near the distorted borders of the unrectified mono
     # images, per NVIDIA's OAK-D example (50/70/70 at 1280x720, scaled to
@@ -133,7 +156,7 @@ oak_d_cuvslam_px4_publisher:
     position_variance: [0.01, 0.01, 0.02]
     orientation_variance: [0.01, 0.01, 0.02]
     velocity_variance: [0.1, 0.1, 0.1]
-    use_cuvslam_covariance: true
+    use_cuvslam_covariance: false
     # Velocity sent to PX4 is the least-squares slope over this many NED
     # poses (~330 ms at 30 fps) instead of a two-frame difference, which
     # would turn the ~5 mm bench pose noise into ~0.3 m/s velocity noise.
@@ -141,7 +164,7 @@ oak_d_cuvslam_px4_publisher:
     # position variance wherever it exceeds the floors above — unlike the
     # tracker covariance it actually grows when tracking degrades.
     velocity_window_frames: 10
-    use_empirical_covariance: true
+    use_empirical_covariance: false
     # Warn when a single track() call blocks the pipeline loop longer than
     # this (frames drop while it runs); a stereo-frame gap longer than
     # velocity_reset_gap_s skips velocity differentiation across the gap and
