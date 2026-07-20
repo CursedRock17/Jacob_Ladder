@@ -37,6 +37,9 @@ DroneSmoothPlanner::DroneSmoothPlanner(rclcpp::Node& node)
 
 void DroneSmoothPlanner::loadParameters()
 {
+	_node.declare_parameter<float>("takeoff_optical_flow_height", 0.50f);
+	_node.declare_parameter<float>("takeoff_optical_flow_hold_time", 3.0f);
+	_node.declare_parameter<float>("takeoff_optical_flow_reached_tol", 0.10f);
 	_node.declare_parameter<float>("takeoff_height", 1.75f);
 	_node.declare_parameter<float>("climb_rate", 0.3f);
 	_node.declare_parameter<float>("takeoff_reached_tol", 0.10f);
@@ -51,6 +54,9 @@ void DroneSmoothPlanner::loadParameters()
 	_node.declare_parameter<float>("hover_duration", 1.5f);
 	_node.declare_parameter<float>("drogue_timeout", 3.0f);
 
+	_node.get_parameter("takeoff_optical_flow_height", _param_takeoff_optical_flow_height);
+	_node.get_parameter("takeoff_optical_flow_hold_time", _param_takeoff_optical_flow_hold_time);
+	_node.get_parameter("takeoff_optical_flow_reached_tol", _param_takeoff_optical_flow_reached_tol);
 	_node.get_parameter("takeoff_height", _param_takeoff_height);
 	_node.get_parameter("climb_rate", _param_climb_rate);
 	_node.get_parameter("takeoff_reached_tol", _param_takeoff_reached_tol);
@@ -85,14 +91,25 @@ void DroneSmoothPlanner::onActivate()
 	_last_plan_time = _node.now();
 	_last_plan_target_ned = Eigen::Vector3f::Zero();
 
-	// Capture the arm position so the climb (and XY hold) is relative to it
+	// Capture the arm position so both takeoff stages and XY hold are relative to it.
 	_base_position = _vehicle_local_position->positionNed();
 	_takeoff_setpoint = _base_position;
 
+	// Stage 1 commands a fixed low-altitude position so optical flow can initialize.
+	_takeoff_setpoint.z() =
+		_base_position.z() - _param_takeoff_optical_flow_height;
+	_takeoff_phase = TakeoffPhase::OpticalFlowInit;
+	_takeoff_phase_elapsed_s = 0.0f;
+	_reached_optical_flow_height = false;
+
 	switchToState(State::Takeoff);
 	RCLCPP_INFO(_node.get_logger(),
-		"DroneSmoothPlanner activated — climbing %.2f m above arm position at %.1f m/s",
-		_param_takeoff_height, _param_climb_rate);
+		"DroneSmoothPlanner activated — optical-flow init at %.2f m for %.1f s, "
+		"then climbing to %.2f m at %.2f m/s",
+		_param_takeoff_optical_flow_height,
+		_param_takeoff_optical_flow_hold_time,
+		_param_takeoff_height,
+		_param_climb_rate);
 }
 
 void DroneSmoothPlanner::onDeactivate()
@@ -112,32 +129,90 @@ void DroneSmoothPlanner::updateSetpoint(float dt_s)
 	switch (_state) {
 
 	case State::Takeoff: {
-		// Target altitude is takeoff_height above the arm position (NED: up is -z)
-		const float target_z = _base_position.z() - _param_takeoff_height;
 		const float current_z = _vehicle_local_position->positionNed().z();
 		const float altitude_gained = _base_position.z() - current_z;
 
-		RCLCPP_INFO_THROTTLE(_node.get_logger(), *_node.get_clock(), 2000,
-			"[Takeoff] height: %.2f m | target: %.2f m | setpoint_z: %.2f m",
-			altitude_gained, _param_takeoff_height, _takeoff_setpoint.z());
+		switch (_takeoff_phase) {
 
-		// Ramp the z setpoint upward at climb_rate; XY stays fixed at the arm position
-		_takeoff_setpoint.z() -= _param_climb_rate * dt_s;
-		if (_takeoff_setpoint.z() <= target_z) {
-			_takeoff_setpoint.z() = target_z;
+		case TakeoffPhase::OpticalFlowInit: {
+			// Hold a fixed low-altitude position. The stabilization timer starts only
+			// after measured altitude confirms that the vehicle reached this height.
+			RCLCPP_INFO_THROTTLE(_node.get_logger(), *_node.get_clock(), 2000,
+				"[Takeoff:OpticalFlowInit] gained: %.2f m | target: %.2f m | "
+				"hold elapsed: %.1f / %.1f s",
+				altitude_gained,
+				_param_takeoff_optical_flow_height,
+				_takeoff_phase_elapsed_s,
+				_param_takeoff_optical_flow_hold_time);
+
+			if (!_reached_optical_flow_height &&
+				altitude_gained >=
+					(_param_takeoff_optical_flow_height -
+					 _param_takeoff_optical_flow_reached_tol)) {
+				_reached_optical_flow_height = true;
+				_takeoff_phase_elapsed_s = 0.0f;
+				RCLCPP_INFO(_node.get_logger(),
+					"Reached optical-flow initialization height (actual %.2f m) — "
+					"holding for %.1f s",
+					altitude_gained,
+					_param_takeoff_optical_flow_hold_time);
+			}
+
+			if (_reached_optical_flow_height) {
+				_takeoff_phase_elapsed_s += dt_s;
+			}
+
+			_trajectory_setpoint->update(
+				px4_ros2::TrajectorySetpoint{}
+					.withPosition(_takeoff_setpoint)
+					.withYaw(0.0f));
+
+			if (_reached_optical_flow_height &&
+				_takeoff_phase_elapsed_s >=
+					_param_takeoff_optical_flow_hold_time) {
+				_takeoff_phase = TakeoffPhase::Climbing;
+				_takeoff_phase_elapsed_s = 0.0f;
+				RCLCPP_INFO(_node.get_logger(),
+					"Optical flow stabilized — climbing to %.2f m",
+					_param_takeoff_height);
+			}
+			break;
 		}
 
-		px4_ros2::TrajectorySetpoint setpoint;
-		setpoint.withPosition(_takeoff_setpoint)
-			.withVelocityZ(-_param_climb_rate)
-			.withYaw(0.0f);
-		_trajectory_setpoint->update(setpoint);
+		case TakeoffPhase::Climbing: {
+			// Ramp from the optical-flow hold height to the final takeoff height.
+			const float target_z = _base_position.z() - _param_takeoff_height;
 
-		// Hand off to search once the drone has actually reached the target height
-		if (altitude_gained >= _param_takeoff_height - _param_takeoff_reached_tol) {
-			RCLCPP_INFO(_node.get_logger(),
-				"Reached takeoff height (%.2f m) — searching for drogue", altitude_gained);
-			switchToState(State::Search);
+			_takeoff_setpoint.z() -= _param_climb_rate * dt_s;
+			if (_takeoff_setpoint.z() <= target_z) {
+				_takeoff_setpoint.z() = target_z;
+			}
+
+			RCLCPP_INFO_THROTTLE(_node.get_logger(), *_node.get_clock(), 2000,
+				"[Takeoff:Climbing] gained: %.2f m | target: %.2f m | "
+				"setpoint_z: %.2f m",
+				altitude_gained,
+				_param_takeoff_height,
+				_takeoff_setpoint.z());
+
+			const bool reached_final_height =
+				altitude_gained >=
+					(_param_takeoff_height - _param_takeoff_reached_tol);
+
+			_trajectory_setpoint->update(
+				px4_ros2::TrajectorySetpoint{}
+					.withPosition(_takeoff_setpoint)
+					.withVelocityZ(reached_final_height ? 0.0f : -_param_climb_rate)
+					.withYaw(0.0f));
+
+			if (reached_final_height) {
+				RCLCPP_INFO(_node.get_logger(),
+					"Reached takeoff height (actual %.2f m) — searching for drogue",
+					altitude_gained);
+				switchToState(State::Search);
+			}
+			break;
+		}
 		}
 		break;
 	}
