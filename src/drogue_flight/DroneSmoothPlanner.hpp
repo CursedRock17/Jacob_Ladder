@@ -43,11 +43,17 @@ public:
 private:
 	// Mode state machine: Takeoff -> Search -> Approach -> Hover -> Finished
 	enum class State {
-		Takeoff,    // Climb to takeoff_height above the arm position, holding XY
+		Takeoff,    // Optical-flow init, then climb to takeoff_height while holding XY
 		Search,     // Hold position, wait for drogue detection
 		Approach,   // Follow S-curve waypoints toward drogue
 		Hover,      // Hold position near drogue before completing
 		Finished    // Signal success back to executor
+	};
+
+	// Two-stage takeoff sub-state: initialize optical flow, then climb to mission height.
+	enum class TakeoffPhase {
+		OpticalFlowInit,
+		Climbing
 	};
 
 	void loadParameters();
@@ -94,6 +100,11 @@ private:
 	Eigen::Vector3f _base_position = Eigen::Vector3f::Zero();     // NED pose at activation
 	Eigen::Vector3f _takeoff_setpoint = Eigen::Vector3f::Zero();  // ramped climb target (XY held)
 
+	// Two-stage takeoff state
+	TakeoffPhase _takeoff_phase = TakeoffPhase::OpticalFlowInit;
+	float _takeoff_phase_elapsed_s = 0.0f;
+	bool _reached_optical_flow_height = false;
+
 	// Latest drogue pose relative to drone, updated by YOLO pipeline
 	Eigen::Vector3f _drogue_pose = Eigen::Vector3f::Zero();
 	bool _drogue_valid = false;
@@ -109,7 +120,10 @@ private:
 	rclcpp::Time _hover_start_time{};
 
 	// Tunable ROS parameters (adjustable via CLI or launch file)
-	float _param_takeoff_height = 1.75f;      // Climb height above arm position [m]
+	float _param_takeoff_optical_flow_height = 0.50f;      // Initial optical-flow height [m]
+	float _param_takeoff_optical_flow_hold_time = 3.0f;    // Stabilization hold duration [s]
+	float _param_takeoff_optical_flow_reached_tol = 0.10f; // Arrival tolerance for optical-flow height [m]
+	float _param_takeoff_height = 1.75f;      // Final climb height above arm position [m]
 	float _param_climb_rate = 0.3f;           // Vertical climb speed [m/s]
 	float _param_takeoff_reached_tol = 0.10f; // Altitude tolerance to finish climb [m]
 	int _param_num_waypoints = 10;            // Number of points along the S-curve
