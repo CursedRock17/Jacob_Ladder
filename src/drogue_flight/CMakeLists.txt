@@ -11,6 +11,7 @@ find_package(eigen3_cmake_module REQUIRED)
 find_package(Eigen3 REQUIRED)
 
 find_package(px4_ros2_cpp REQUIRED)
+find_package(px4_msgs REQUIRED)
 find_package(geometry_msgs REQUIRED)
 find_package(nav_msgs REQUIRED)
 
@@ -20,7 +21,7 @@ include_directories(${Eigen3_INCLUDE_DIRS})
 add_executable(drone_smooth_planner
   DroneSmoothPlanner.cpp
 )
-ament_target_dependencies(drone_smooth_planner rclcpp Eigen3 px4_ros2_cpp geometry_msgs nav_msgs)
+ament_target_dependencies(drone_smooth_planner rclcpp Eigen3 px4_ros2_cpp px4_msgs geometry_msgs nav_msgs)
 target_compile_features(drone_smooth_planner PUBLIC c_std_99 cxx_std_17)
 
 install(TARGETS

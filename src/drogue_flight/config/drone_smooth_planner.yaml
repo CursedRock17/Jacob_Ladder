@@ -1,29 +1,28 @@
 drone_smooth_planner:
   ros__parameters:
-    # Two-stage in-mode takeoff
-    # Stage 1: climb to a low altitude and hold so optical flow can initialize.
-    takeoff_optical_flow_height: 0.25        # meters above the arm position
-    takeoff_optical_flow_hold_time: 1.0      # seconds to hold after reaching the height
-    takeoff_optical_flow_reached_tol: 0.05   # meters — tolerance for starting the hold timer
-
-    # Stage 2: climb from the optical-flow height to the final takeoff height.
-    # All heights are relative to the arm position; XY remains fixed.
-    takeoff_height: 1.750       # meters above the arm position
-    climb_rate: 0.25             # m/s — vertical climb speed during the final climb
-    takeoff_reached_tol: 0.05   # meters — altitude tolerance to finish takeoff
+    # Takeoff is PX4's native takeoff, run by the executor before the mode starts
+    # (same call precision_land uses). The mode itself never climbs — it activates
+    # already airborne and goes straight to searching for the drogue.
+    takeoff_height: 1.750       # meters — native takeoff altitude
 
     # Drogue approach
-    # The vehicle flies to a standoff point rather than the drogue itself: it holds
-    # drogue_standoff_m of horizontal separation while matching the drogue's altitude.
-    # This is the guard against flying into the drogue — do not set it to 0.
-    drogue_standoff_m: 3.0      # meters — horizontal standoff held from the drogue
+    # The vehicle flies to a standoff point rather than the drogue itself: a point
+    # drogue_standoff_m back along the drone->drogue bearing, at the drogue's altitude.
+    # Measured from the approach line, so it holds this distance no matter which way
+    # the drone came in and can never route through the drogue. Guard against flying
+    # into the drogue — do not set it to 0.
+    drogue_standoff_m: 3.0      # meters — standoff held back from the drogue
 
     # The setpoint is a single waypoint recomputed each tick, placed carrot_lead_time
     # ahead of the vehicle along the bearing to the standoff point. PX4's position
     # controller closes the loop, so no trajectory is precomputed here.
     carrot_lead_time: 1.0       # seconds — how far ahead the setpoint leads the vehicle
-    waypoint_tolerance_m: 0.15  # meters — distance to consider the standoff point reached
+
+    # Arrival band for the final waypoint (the standoff point), checked per-axis in
+    # NED: arrived when N, E and D errors are each within +/- this value. On arrival
+    # the mode holds station indefinitely and keeps re-tracking the drogue; it drops
+    # back to the speed-limited approach only past 2x this band (hysteresis).
+    final_waypoint_tolerance_m: 0.25   # meters — +/- per-axis
     max_velocity: 0.5           # m/s — approach speed cap (velocity feed-forward)
     camera_pitch_deg: 0.0       # forward YOLO camera pitch; positive = tilted down [deg]
-    hover_duration: 1.5         # seconds — hover at the standoff point before completing
     drogue_timeout: 3.0         # seconds — maximum drogue pose age before it is considered lost

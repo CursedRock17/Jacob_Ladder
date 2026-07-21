@@ -9,6 +9,7 @@
 #include <rclcpp/rclcpp.hpp>
 #include <geometry_msgs/msg/pose_stamped.hpp>
 #include <nav_msgs/msg/path.hpp>
+#include <px4_msgs/msg/vehicle_local_position.hpp>
 
 #include <Eigen/Core>
 #include <Eigen/Geometry>
@@ -31,19 +32,16 @@ public:
 	void updateSetpoint(float dt_s) override;
 
 private:
-	// Mode state machine: Takeoff -> Search -> Approach -> Hover -> Finished
+	// Mode state machine: Search -> Approach <-> Hover
+	// The executor performs a PX4 native takeoff before scheduling this mode, so the
+	// vehicle is already airborne on activation and there is no in-mode climb.
+	// There is no terminal state either: once the standoff point is reached the mode
+	// holds station indefinitely and keeps tracking the drogue, dropping back to
+	// Approach if the drogue moves far enough to need a speed-limited transit.
 	enum class State {
-		Takeoff,    // Optical-flow init, then climb to takeoff_height while holding XY
 		Search,     // Hold position, wait for drogue detection
-		Approach,   // Drive toward the standoff point offset from the drogue
-		Hover,      // Hold position at the standoff point before completing
-		Finished    // Signal success back to executor
-	};
-
-	// Two-stage takeoff sub-state: initialize optical flow, then climb to mission height.
-	enum class TakeoffPhase {
-		OpticalFlowInit,
-		Climbing
+		Approach,   // Drive toward the standoff point in front of the drogue
+		Hover       // Station-keep on the (continuously re-tracked) standoff point
 	};
 
 	void loadParameters();
@@ -54,11 +52,16 @@ private:
 	// valid drogue pose or attitude is available yet.
 	bool drogueTargetNed(Eigen::Vector3f& target_ned) const;
 
-	// Standoff point we actually fly to: the drogue's altitude, held back by
-	// drogue_standoff_m of *horizontal* separation along the drone->drogue bearing.
-	// This is what keeps the vehicle from flying into the drogue. Returns false for
-	// the same reasons drogueTargetNed() does.
+	// Standoff point we actually fly to: drogue_standoff_m back along the drone->drogue
+	// bearing, at the drogue's altitude. Measured from our own approach line, so the
+	// path to it never crosses the drogue and it self-corrects on overshoot. Returns
+	// false for the same reasons drogueTargetNed() does.
 	bool drogueStandoffNed(Eigen::Vector3f& standoff_ned) const;
+
+	// True when every NED component of the error is inside +/- the given band.
+	// Checked per-axis rather than on the magnitude so the pass/fail matches the
+	// per-axis error vector printed in the approach log.
+	bool withinTolerance(const Eigen::Vector3f& error_ned, float band_m) const;
 
 	// Helpers
 	void publishPathVisualization(const Eigen::Vector3f& from, const Eigen::Vector3f& standoff,
@@ -79,43 +82,25 @@ private:
 	std::shared_ptr<px4_ros2::OdometryAttitude> _vehicle_attitude;
 	std::shared_ptr<px4_ros2::TrajectorySetpointType> _trajectory_setpoint;
 
-	State _state = State::Takeoff;
-
-	// Takeoff climb: captured at activation so the climb is relative to arm position
-	Eigen::Vector3f _base_position = Eigen::Vector3f::Zero();     // NED pose at activation
-	Eigen::Vector3f _takeoff_setpoint = Eigen::Vector3f::Zero();  // ramped climb target (XY held)
-
-	// Two-stage takeoff state
-	TakeoffPhase _takeoff_phase = TakeoffPhase::OpticalFlowInit;
-	float _takeoff_phase_elapsed_s = 0.0f;
-	bool _reached_optical_flow_height = false;
+	State _state = State::Search;
 
 	// Latest drogue pose relative to drone, updated by YOLO pipeline
 	Eigen::Vector3f _drogue_pose = Eigen::Vector3f::Zero();
 	bool _drogue_valid = false;
 	rclcpp::Time _drogue_timestamp{};
 
-	// Hover state
-	Eigen::Vector3f _hover_position = Eigen::Vector3f::Zero();
-	rclcpp::Time _hover_start_time{};
-
 	// Tunable ROS parameters (adjustable via CLI or launch file)
-	float _param_takeoff_optical_flow_height = 0.50f;      // Initial optical-flow height [m]
-	float _param_takeoff_optical_flow_hold_time = 3.0f;    // Stabilization hold duration [s]
-	float _param_takeoff_optical_flow_reached_tol = 0.10f; // Arrival tolerance for optical-flow height [m]
-	float _param_takeoff_height = 1.75f;      // Final climb height above arm position [m]
-	float _param_climb_rate = 0.3f;           // Vertical climb speed [m/s]
-	float _param_takeoff_reached_tol = 0.10f; // Altitude tolerance to finish climb [m]
-	float _param_drogue_standoff_m = 3.0f;     // Horizontal standoff kept from the drogue [m]
+	float _param_takeoff_height = 1.75f;       // PX4 native takeoff altitude [m]
+	float _param_drogue_standoff_m = 3.0f;     // Standoff kept back from the drogue [m]
 	float _param_carrot_lead_time = 1.0f;      // Setpoint lead ahead of the vehicle [s]
-	float _param_waypoint_tolerance_m = 0.15f; // Distance to consider the standoff point reached
+	// Per-axis (+/-) NED band around the standoff point counted as "arrived"
+	float _param_final_waypoint_tolerance_m = 0.25f;
 	float _param_max_velocity = 0.5f;          // Approach speed cap [m/s]
 	float _param_camera_pitch_deg = 0.0f;      // Forward cam mount pitch, +ve = tilted down [deg]
-	float _param_hover_duration = 1.5f;        // How long to hover at drogue before completing [s]
 	float _param_drogue_timeout = 3.0f;        // Max age of drogue pose before considered lost [s]
 };
 
-// Executor: manages the arm -> hand-off-to-mode lifecycle (climb runs in the mode)
+// Executor: arm -> PX4 native takeoff -> hand off to the DroneSmoothPlanner mode
 class DroneSmoothPlannerExecutor : public px4_ros2::ModeExecutorBase
 {
 public:
@@ -124,7 +109,8 @@ public:
 	// Sequential executor states driven by PX4 result callbacks
 	enum class State {
 		Arming,      // Request vehicle arm
-		Approaching, // Hand control to DroneSmoothPlanner mode (climb runs in-mode)
+		TakingOff,   // PX4 native takeoff to takeoff_height
+		Approaching, // Hand control to DroneSmoothPlanner mode (already airborne)
 	};
 
 	void onActivate() override;
@@ -134,6 +120,15 @@ private:
 	void runState(State state, px4_ros2::Result result);
 
 	rclcpp::Node& _node;
+
+	// takeoff() completion is detected two ways because its callback does not fire
+	// reliably below MIS_TAKEOFF_ALT: this local-position watcher, and the callback
+	// itself. Whichever arrives first wins, guarded by _takeoff_complete.
+	rclcpp::Subscription<px4_msgs::msg::VehicleLocalPosition>::SharedPtr _local_pos_sub;
+	float _param_takeoff_height = 1.75f;
+	float _takeoff_target_z = 0.0f;
+	bool _in_takeoff = false;
+	bool _takeoff_complete = false;
 };
 
 } // namespace drogue_flight

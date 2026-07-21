@@ -37,32 +37,20 @@ DroneSmoothPlanner::DroneSmoothPlanner(rclcpp::Node& node)
 
 void DroneSmoothPlanner::loadParameters()
 {
-	_node.declare_parameter<float>("takeoff_optical_flow_height", 0.50f);
-	_node.declare_parameter<float>("takeoff_optical_flow_hold_time", 3.0f);
-	_node.declare_parameter<float>("takeoff_optical_flow_reached_tol", 0.10f);
 	_node.declare_parameter<float>("takeoff_height", 1.75f);
-	_node.declare_parameter<float>("climb_rate", 0.3f);
-	_node.declare_parameter<float>("takeoff_reached_tol", 0.10f);
 	_node.declare_parameter<float>("drogue_standoff_m", 3.0f);
 	_node.declare_parameter<float>("carrot_lead_time", 1.0f);
-	_node.declare_parameter<float>("waypoint_tolerance_m", 0.15f);
+	_node.declare_parameter<float>("final_waypoint_tolerance_m", 0.25f);
 	_node.declare_parameter<float>("max_velocity", 0.5f);
 	_node.declare_parameter<float>("camera_pitch_deg", 0.0f);
-	_node.declare_parameter<float>("hover_duration", 1.5f);
 	_node.declare_parameter<float>("drogue_timeout", 3.0f);
 
-	_node.get_parameter("takeoff_optical_flow_height", _param_takeoff_optical_flow_height);
-	_node.get_parameter("takeoff_optical_flow_hold_time", _param_takeoff_optical_flow_hold_time);
-	_node.get_parameter("takeoff_optical_flow_reached_tol", _param_takeoff_optical_flow_reached_tol);
 	_node.get_parameter("takeoff_height", _param_takeoff_height);
-	_node.get_parameter("climb_rate", _param_climb_rate);
-	_node.get_parameter("takeoff_reached_tol", _param_takeoff_reached_tol);
 	_node.get_parameter("drogue_standoff_m", _param_drogue_standoff_m);
 	_node.get_parameter("carrot_lead_time", _param_carrot_lead_time);
-	_node.get_parameter("waypoint_tolerance_m", _param_waypoint_tolerance_m);
+	_node.get_parameter("final_waypoint_tolerance_m", _param_final_waypoint_tolerance_m);
 	_node.get_parameter("max_velocity", _param_max_velocity);
 	_node.get_parameter("camera_pitch_deg", _param_camera_pitch_deg);
-	_node.get_parameter("hover_duration", _param_hover_duration);
 	_node.get_parameter("drogue_timeout", _param_drogue_timeout);
 }
 
@@ -81,25 +69,11 @@ void DroneSmoothPlanner::onActivate()
 {
 	_drogue_valid = false;
 
-	// Capture the arm position so both takeoff stages and XY hold are relative to it.
-	_base_position = _vehicle_local_position->positionNed();
-	_takeoff_setpoint = _base_position;
-
-	// Stage 1 commands a fixed low-altitude position so optical flow can initialize.
-	_takeoff_setpoint.z() =
-		_base_position.z() - _param_takeoff_optical_flow_height;
-	_takeoff_phase = TakeoffPhase::OpticalFlowInit;
-	_takeoff_phase_elapsed_s = 0.0f;
-	_reached_optical_flow_height = false;
-
-	switchToState(State::Takeoff);
+	switchToState(State::Search);
 	RCLCPP_INFO(_node.get_logger(),
-		"DroneSmoothPlanner activated — optical-flow init at %.2f m for %.1f s, "
-		"then climbing to %.2f m at %.2f m/s",
-		_param_takeoff_optical_flow_height,
-		_param_takeoff_optical_flow_hold_time,
-		_param_takeoff_height,
-		_param_climb_rate);
+		"DroneSmoothPlanner activated (already airborne) — searching for drogue, "
+		"standoff %.2f m",
+		_param_drogue_standoff_m);
 }
 
 void DroneSmoothPlanner::onDeactivate()
@@ -115,95 +89,6 @@ void DroneSmoothPlanner::updateSetpoint(float dt_s)
 		(now - _drogue_timestamp).seconds() > _param_drogue_timeout;
 
 	switch (_state) {
-
-	case State::Takeoff: {
-		const float current_z = _vehicle_local_position->positionNed().z();
-		const float altitude_gained = _base_position.z() - current_z;
-
-		switch (_takeoff_phase) {
-
-		case TakeoffPhase::OpticalFlowInit: {
-			// Hold a fixed low-altitude position. The stabilization timer starts only
-			// after measured altitude confirms that the vehicle reached this height.
-			RCLCPP_INFO_THROTTLE(_node.get_logger(), *_node.get_clock(), 2000,
-				"[Takeoff:OpticalFlowInit] gained: %.2f m | target: %.2f m | "
-				"hold elapsed: %.1f / %.1f s",
-				altitude_gained,
-				_param_takeoff_optical_flow_height,
-				_takeoff_phase_elapsed_s,
-				_param_takeoff_optical_flow_hold_time);
-
-			if (!_reached_optical_flow_height &&
-				altitude_gained >=
-					(_param_takeoff_optical_flow_height -
-					 _param_takeoff_optical_flow_reached_tol)) {
-				_reached_optical_flow_height = true;
-				_takeoff_phase_elapsed_s = 0.0f;
-				RCLCPP_INFO(_node.get_logger(),
-					"Reached optical-flow initialization height (actual %.2f m) — "
-					"holding for %.1f s",
-					altitude_gained,
-					_param_takeoff_optical_flow_hold_time);
-			}
-
-			if (_reached_optical_flow_height) {
-				_takeoff_phase_elapsed_s += dt_s;
-			}
-
-			_trajectory_setpoint->update(
-				px4_ros2::TrajectorySetpoint{}
-					.withPosition(_takeoff_setpoint)
-					.withYaw(0.0f));
-
-			if (_reached_optical_flow_height &&
-				_takeoff_phase_elapsed_s >=
-					_param_takeoff_optical_flow_hold_time) {
-				_takeoff_phase = TakeoffPhase::Climbing;
-				_takeoff_phase_elapsed_s = 0.0f;
-				RCLCPP_INFO(_node.get_logger(),
-					"Optical flow stabilized — climbing to %.2f m",
-					_param_takeoff_height);
-			}
-			break;
-		}
-
-		case TakeoffPhase::Climbing: {
-			// Ramp from the optical-flow hold height to the final takeoff height.
-			const float target_z = _base_position.z() - _param_takeoff_height;
-
-			_takeoff_setpoint.z() -= _param_climb_rate * dt_s;
-			if (_takeoff_setpoint.z() <= target_z) {
-				_takeoff_setpoint.z() = target_z;
-			}
-
-			RCLCPP_INFO_THROTTLE(_node.get_logger(), *_node.get_clock(), 2000,
-				"[Takeoff:Climbing] gained: %.2f m | target: %.2f m | "
-				"setpoint_z: %.2f m",
-				altitude_gained,
-				_param_takeoff_height,
-				_takeoff_setpoint.z());
-
-			const bool reached_final_height =
-				altitude_gained >=
-					(_param_takeoff_height - _param_takeoff_reached_tol);
-
-			_trajectory_setpoint->update(
-				px4_ros2::TrajectorySetpoint{}
-					.withPosition(_takeoff_setpoint)
-					.withVelocityZ(reached_final_height ? 0.0f : -_param_climb_rate)
-					.withYaw(0.0f));
-
-			if (reached_final_height) {
-				RCLCPP_INFO(_node.get_logger(),
-					"Reached takeoff height (actual %.2f m) — searching for drogue",
-					altitude_gained);
-				switchToState(State::Search);
-			}
-			break;
-		}
-		}
-		break;
-	}
 
 	case State::Search: {
 		RCLCPP_INFO_THROTTLE(_node.get_logger(), *_node.get_clock(), 3000,
@@ -232,9 +117,10 @@ void DroneSmoothPlanner::updateSetpoint(float dt_s)
 			break;
 		}
 
-		// Recompute the standoff target from the latest detection every tick. There is
-		// no precomputed path to invalidate, so no replan gating is needed — the
-		// setpoint simply tracks wherever the drogue currently is.
+		// Re-derive the standoff every tick. It sits drogue_standoff_m short of the
+		// drogue on our OWN approach line, so a straight carrot toward it can never
+		// cross the drogue, and it self-corrects: if we drift inside the standoff
+		// distance the target lands behind us and the same setpoint commands a retreat.
 		Eigen::Vector3f drogue_ned;
 		Eigen::Vector3f standoff_ned;
 		if (!drogueTargetNed(drogue_ned) || !drogueStandoffNed(standoff_ned)) {
@@ -247,28 +133,31 @@ void DroneSmoothPlanner::updateSetpoint(float dt_s)
 		const Eigen::Vector3f to_standoff = standoff_ned - pos;
 		const float distance = to_standoff.norm();
 
+		// Error printed per-axis (N/E/D, +D = standoff is below us) rather than as a
+		// magnitude, so a ground test can see which axis is off. Tolerance shown too.
 		RCLCPP_INFO_THROTTLE(_node.get_logger(), *_node.get_clock(), 2000,
-			"[Approach] %.2f m to standoff | drogue NED: [%.2f, %.2f, %.2f] | "
-			"pos: [%.2f, %.2f, %.2f]",
-			distance,
+			"[Approach] error NED: [N %+.2f, E %+.2f, D %+.2f] m (tol +/-%.2f) | "
+			"drogue NED: [%.2f, %.2f, %.2f] | pos: [%.2f, %.2f, %.2f]",
+			to_standoff.x(), to_standoff.y(), to_standoff.z(),
+			_param_final_waypoint_tolerance_m,
 			drogue_ned.x(), drogue_ned.y(), drogue_ned.z(),
 			pos.x(), pos.y(), pos.z());
 
-		if (distance < _param_waypoint_tolerance_m) {
+		if (withinTolerance(to_standoff, _param_final_waypoint_tolerance_m)) {
 			RCLCPP_INFO(_node.get_logger(),
-				"Reached %.2f m standoff — hovering", _param_drogue_standoff_m);
-			_hover_position = pos;
-			_hover_start_time = now;
+				"Reached %.2f m standoff (error NED [%+.2f, %+.2f, %+.2f] m) — "
+				"holding station and tracking drogue",
+				_param_drogue_standoff_m,
+				to_standoff.x(), to_standoff.y(), to_standoff.z());
 			switchToState(State::Hover);
 			break;
 		}
 
-		// Carrot setpoint: a single normalized waypoint placed one lead-time ahead of
-		// the vehicle along the bearing to the standoff point, never past it. PX4's
-		// position controller closes the loop on this; the velocity feed-forward is
-		// what actually caps approach speed at max_velocity, since offboard setpoints
-		// bypass the mission-mode trajectory shaping and would otherwise be limited
-		// only by MPC_XY_VEL_MAX.
+		// Carrot setpoint: a single waypoint placed one lead-time ahead of the vehicle
+		// along the bearing to the standoff point, never past it. PX4's position
+		// controller closes the loop; the velocity feed-forward caps approach speed at
+		// max_velocity, since offboard setpoints bypass mission-mode trajectory shaping
+		// and would otherwise be limited only by MPC_XY_VEL_MAX.
 		const Eigen::Vector3f direction = to_standoff / distance;
 		const float full_lead = _param_max_velocity * _param_carrot_lead_time;
 		const float lead = std::min(full_lead, distance);
@@ -279,8 +168,7 @@ void DroneSmoothPlanner::updateSetpoint(float dt_s)
 			? _param_max_velocity * std::min(1.0f, distance / full_lead)
 			: 0.0f;
 
-		// Yaw tracks the drogue itself, not the standoff point, so the camera stays on
-		// target through the whole approach.
+		// Yaw tracks the drogue itself so the camera stays on target during transit.
 		const float yaw = std::atan2(drogue_ned.y() - pos.y(), drogue_ned.x() - pos.x());
 
 		px4_ros2::TrajectorySetpoint setpoint;
@@ -294,26 +182,55 @@ void DroneSmoothPlanner::updateSetpoint(float dt_s)
 	}
 
 	case State::Hover: {
-		RCLCPP_INFO_THROTTLE(_node.get_logger(), *_node.get_clock(), 2000,
-			"[Hover] pos: [%.2f, %.2f, %.2f] | elapsed: %.1f s / %.1f s",
-			_vehicle_local_position->positionNed().x(),
-			_vehicle_local_position->positionNed().y(),
-			_vehicle_local_position->positionNed().z(),
-			(now - _hover_start_time).seconds(), _param_hover_duration);
-		// Hold position near the drogue for a brief stabilization window
-		_trajectory_setpoint->updatePosition(_hover_position);
-
-		if ((now - _hover_start_time).seconds() > _param_hover_duration) {
-			RCLCPP_INFO(_node.get_logger(), "Hover complete — finishing");
-			switchToState(State::Finished);
+		// Station-keeping, not a timed hold: the mode stays here indefinitely and never
+		// completes, so the vehicle holds the standoff until the pilot takes over.
+		if (drogue_expired) {
+			RCLCPP_WARN(_node.get_logger(), "Drogue lost — returning to search");
+			switchToState(State::Search);
+			break;
 		}
-		break;
-	}
 
-	case State::Finished: {
-		// Keep holding while signaling the executor that the mode is done
-		_trajectory_setpoint->updatePosition(_hover_position);
-		ModeBase::completed(px4_ros2::Result::Success);
+		// The drogue can keep moving, so the standoff is re-derived every tick here too
+		// and commanded directly. Small drifts are corrected by PX4's position controller
+		// without leaving this state — this is what keeps us tracking a drifting drogue.
+		Eigen::Vector3f drogue_ned;
+		Eigen::Vector3f standoff_ned;
+		if (!drogueTargetNed(drogue_ned) || !drogueStandoffNed(standoff_ned)) {
+			_trajectory_setpoint->updatePosition(_vehicle_local_position->positionNed());
+			break;
+		}
+
+		const Eigen::Vector3f pos = _vehicle_local_position->positionNed();
+		const Eigen::Vector3f to_standoff = standoff_ned - pos;
+
+		RCLCPP_INFO_THROTTLE(_node.get_logger(), *_node.get_clock(), 2000,
+			"[Hover] error NED: [N %+.2f, E %+.2f, D %+.2f] m (tol +/-%.2f) | "
+			"drogue NED: [%.2f, %.2f, %.2f] | pos: [%.2f, %.2f, %.2f]",
+			to_standoff.x(), to_standoff.y(), to_standoff.z(),
+			_param_final_waypoint_tolerance_m,
+			drogue_ned.x(), drogue_ned.y(), drogue_ned.z(),
+			pos.x(), pos.y(), pos.z());
+
+		// Hand back to Approach once the drogue has moved far enough that closing the gap
+		// deserves the speed-limited carrot. Commanding a distant position setpoint
+		// directly would let the controller pick its own (much faster) transit speed,
+		// which is exactly what the carrot exists to prevent. The 2x band gives
+		// hysteresis so the two states cannot chatter at the tolerance boundary.
+		if (!withinTolerance(to_standoff, 2.0f * _param_final_waypoint_tolerance_m)) {
+			RCLCPP_INFO(_node.get_logger(),
+				"Drogue moved (error NED [%+.2f, %+.2f, %+.2f] m) — re-approaching",
+				to_standoff.x(), to_standoff.y(), to_standoff.z());
+			switchToState(State::Approach);
+			break;
+		}
+
+		const float yaw = std::atan2(drogue_ned.y() - pos.y(), drogue_ned.x() - pos.x());
+		_trajectory_setpoint->update(
+			px4_ros2::TrajectorySetpoint{}
+				.withPosition(standoff_ned)
+				.withYaw(yaw));
+
+		publishPathVisualization(pos, standoff_ned, drogue_ned);
 		break;
 	}
 	}
@@ -353,10 +270,7 @@ bool DroneSmoothPlanner::drogueTargetNed(Eigen::Vector3f& target_ned) const
 	return true;
 }
 
-// Hold drogue_standoff_m of horizontal separation while matching the drogue's
-// altitude. Backing off purely in the horizontal plane means the vehicle ends up
-// level with the drogue at a fixed lateral gap, rather than short of it along a
-// 3D line that could still put it underneath or above the target.
+// Compute the standoff point the vehicle holds relative to the drogue.
 bool DroneSmoothPlanner::drogueStandoffNed(Eigen::Vector3f& standoff_ned) const
 {
 	Eigen::Vector3f drogue_ned;
@@ -364,23 +278,24 @@ bool DroneSmoothPlanner::drogueStandoffNed(Eigen::Vector3f& standoff_ned) const
 		return false;
 	}
 
+	// Standoff = drogue_standoff_m back along the drone->drogue bearing, at the
+	// drogue's altitude. Because it is measured from our own approach line rather than
+	// a fixed heading, the carrot toward it never crosses the drogue, and it self-
+	// corrects: drift inside the standoff distance puts the target behind us, so the
+	// same setpoint drives a retreat back out to the ring.
 	const Eigen::Vector3f pos = _vehicle_local_position->positionNed();
 	const Eigen::Vector2f to_drogue_xy(drogue_ned.x() - pos.x(), drogue_ned.y() - pos.y());
 	const float distance_xy = to_drogue_xy.norm();
 
-	// Match the drogue's altitude regardless of horizontal geometry
 	standoff_ned.z() = drogue_ned.z();
 
 	if (distance_xy < 1e-3f) {
-		// Directly above or below the drogue — no horizontal bearing to back off
-		// along, so hold current XY and let the altitude match bring us level.
+		// Directly above/below the drogue — no horizontal bearing to back off along.
 		standoff_ned.x() = pos.x();
 		standoff_ned.y() = pos.y();
 		return true;
 	}
 
-	// Note: when the drone is already closer than the standoff distance this places
-	// the target behind it, so the same setpoint drives a retreat away from the drogue.
 	const Eigen::Vector2f bearing = to_drogue_xy / distance_xy;
 	standoff_ned.x() = drogue_ned.x() - _param_drogue_standoff_m * bearing.x();
 	standoff_ned.y() = drogue_ned.y() - _param_drogue_standoff_m * bearing.y();
@@ -388,6 +303,13 @@ bool DroneSmoothPlanner::drogueStandoffNed(Eigen::Vector3f& standoff_ned) const
 }
 
 // ── Helpers ──
+
+bool DroneSmoothPlanner::withinTolerance(const Eigen::Vector3f& error_ned, float band_m) const
+{
+	return std::abs(error_ned.x()) <= band_m &&
+	       std::abs(error_ned.y()) <= band_m &&
+	       std::abs(error_ned.z()) <= band_m;
+}
 
 // Publish vehicle -> standoff -> drogue as a nav_msgs::Path for Foxglove, so the
 // standoff gap is visible as the final leg of the line.
@@ -421,11 +343,9 @@ void DroneSmoothPlanner::switchToState(State state)
 std::string DroneSmoothPlanner::stateName(State state) const
 {
 	switch (state) {
-	case State::Takeoff:  return "Takeoff";
 	case State::Search:   return "Search";
 	case State::Approach: return "Approach";
 	case State::Hover:    return "Hover";
-	case State::Finished: return "Finished";
 	default:              return "Unknown";
 	}
 }
@@ -438,11 +358,36 @@ DroneSmoothPlannerExecutor::DroneSmoothPlannerExecutor(rclcpp::Node& node, px4_r
 {
 	// Allow running even if some px4_msgs fields differ between versions
 	setSkipMessageCompatibilityCheck();
+
+	// takeoff_height is declared by the mode, which is constructed first; reuse it as
+	// the native takeoff altitude. Consider takeoff done within 0.2 m (NED z is neg).
+	if (_node.has_parameter("takeoff_height")) {
+		_node.get_parameter("takeoff_height", _param_takeoff_height);
+	}
+	_takeoff_target_z = -(_param_takeoff_height - 0.2f);
+
+	// takeoff()'s completion callback does not fire reliably below MIS_TAKEOFF_ALT,
+	// so watch local position z directly as well — same workaround as TakeoffLand.
+	_local_pos_sub = _node.create_subscription<px4_msgs::msg::VehicleLocalPosition>(
+		"/fmu/out/vehicle_local_position", rclcpp::QoS(1).best_effort(),
+		[this](const px4_msgs::msg::VehicleLocalPosition::SharedPtr msg) {
+			if (_in_takeoff && !_takeoff_complete && msg->z < _takeoff_target_z) {
+				_takeoff_complete = true;
+				_in_takeoff = false;
+				RCLCPP_INFO(_node.get_logger(),
+					"Takeoff altitude reached (z=%.2f) — handing off to mode", msg->z);
+				runState(State::Approaching, px4_ros2::Result::Success);
+			}
+		});
 }
 
 void DroneSmoothPlannerExecutor::onActivate()
 {
-	RCLCPP_INFO(_node.get_logger(), "DroneSmoothPlanner executor — arming");
+	RCLCPP_INFO(_node.get_logger(),
+		"DroneSmoothPlanner executor — arm, PX4 native takeoff to %.2f m, then approach",
+		_param_takeoff_height);
+	_in_takeoff = false;
+	_takeoff_complete = false;
 	runState(State::Arming, px4_ros2::Result::Success);
 }
 
@@ -461,13 +406,27 @@ void DroneSmoothPlannerExecutor::runState(State state, px4_ros2::Result result)
 
 	switch (state) {
 	case State::Arming:
-		// GPS-denied: skip PX4 auto-takeoff (needs AMSL we don't have) and let the
-		// mode's Takeoff state climb via local-NED trajectory setpoints.
-		arm([this](px4_ros2::Result r) { runState(State::Approaching, r); });
+		RCLCPP_INFO(_node.get_logger(), "Arming");
+		arm([this](px4_ros2::Result r) { runState(State::TakingOff, r); });
+		break;
+
+	case State::TakingOff:
+		RCLCPP_INFO(_node.get_logger(), "Armed — PX4 native takeoff to %.2f m",
+			_param_takeoff_height);
+		_in_takeoff = true;
+		_takeoff_complete = false;
+		// Whichever of this callback and the local-position watcher fires first wins.
+		takeoff([this](px4_ros2::Result r) {
+			if (!_takeoff_complete) {
+				_takeoff_complete = true;
+				_in_takeoff = false;
+				runState(State::Approaching, r);
+			}
+		}, _param_takeoff_height);
 		break;
 
 	case State::Approaching:
-		RCLCPP_INFO(_node.get_logger(), "Armed — handing off to DroneSmoothPlanner mode");
+		RCLCPP_INFO(_node.get_logger(), "Takeoff complete — handing off to DroneSmoothPlanner mode");
 		scheduleMode(ownedMode().id(), [this](px4_ros2::Result r) {
 			RCLCPP_INFO(_node.get_logger(), "DroneSmoothPlanner mode ended (%s)", resultToString(r));
 		});

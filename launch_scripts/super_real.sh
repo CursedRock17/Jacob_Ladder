@@ -62,7 +62,7 @@ tmux send-keys -t $SESSION:"Drogue Pose" "ros2 run ros2_yolo_image_processing po
 # Window 6: Autonomous ROS Code
 echo "[6/9] Starting Autonomous ROS Code..."
 tmux new-window -t $SESSION -n "Autonomous ROS Code"
-#tmux send-keys -t $SESSION:"Autonomous ROS Code" "ros2 launch precision_land takeoff_land.launch.py | tee flight_logs/${FLIGHT_NUMBER}_flight/precision_land_takeoff_land.txt" Enter
+tmux send-keys -t $SESSION:"Autonomous ROS Code" "ros2 launch drogue_flight autonomous_smooth_flight.lauch.py | tee flight_logs/third_flight/drogue_flight.txt" Enter
 
 # Window 7 ROS Bag
 echo "[7/9] Starting ROS Bag..."
