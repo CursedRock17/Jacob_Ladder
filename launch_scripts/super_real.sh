@@ -3,6 +3,12 @@
 SESSION="drone"
 FLIGHT_NUMBER="twelve"
 
+# Run everything from the workspace root, wherever this clone lives, so the
+# relative paths below (flight_logs/, launch_scripts/) resolve no matter where
+# the script is invoked from. See jl_env.sh.
+source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../jl_env.sh"
+cd "$JL_WS_ROOT" || exit 1
+
 # Create a logging directory
 
 mkdir -p flight_logs/${FLIGHT_NUMBER}_flight
@@ -73,7 +79,7 @@ tmux send-keys -t $SESSION:"ROS Bag" "./launch_scripts/foxglove_wifi.sh" Enter
 # Window 8: Tegrastats Logger
 echo "[8/9] Starting Tegrastats Logger..."
 tmux new-window -t $SESSION -n "Tegrastats Logger"
-#tmux send-keys -t $SESSION:"Tegrastats Logger" "python3 ~/Downloads/tegrastats_viewer.py --log /home/usmsm/Jacob_Ladder/flight_logs/${FLIGHT_NUMBER}_flight/tegrastats_${FLIGHT_NUMBER}.csv" Enter
+#tmux send-keys -t $SESSION:"Tegrastats Logger" "python3 ~/Downloads/tegrastats_viewer.py --log $JL_WS_ROOT/flight_logs/${FLIGHT_NUMBER}_flight/tegrastats_${FLIGHT_NUMBER}.csv" Enter
 
 echo ""
 echo "=== All nodes launched ==="

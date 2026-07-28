@@ -6,9 +6,10 @@ After=network-online.target
 
 [Service]
 Type=simple
-User=usmsm
-Group=usmsm
-ExecStart=/bin/bash /home/usmsm/Jacob_Ladder/services/run_dds_agent.sh
+User=@JL_USER@
+Group=@JL_GROUP@
+WorkingDirectory=@JL_WS_ROOT@
+ExecStart=/bin/bash @JL_WS_ROOT@/services/run_dds_agent.sh
 Restart=on-failure
 RestartSec=5
 StandardOutput=journal

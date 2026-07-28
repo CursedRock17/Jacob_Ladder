@@ -4,9 +4,10 @@ Description=USB Camera Driver
 
 [Service]
 Type=simple
-User=jacob
-Group=jacob
-ExecStart=/bin/bash /etc/systemd/system/run_usb_cam.sh
+User=@JL_USER@
+Group=@JL_GROUP@
+WorkingDirectory=@JL_WS_ROOT@
+ExecStart=/bin/bash @JL_WS_ROOT@/services/run_usb_cam.sh
 Restart=on-failure
 RestartSec=5s
 StandardOutput=syslog

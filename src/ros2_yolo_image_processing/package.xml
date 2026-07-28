@@ -8,6 +8,7 @@
   <license>TODO: License declaration</license>
 
   <depend>rclpy</depend>
+  <depend>ament_index_python</depend>
   <depend>python3-opencv</depend>
   <depend>std_msgs</depend>
   <depend>vision_msgs</depend>

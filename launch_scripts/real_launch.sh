@@ -1,23 +1,29 @@
-t!/bin/bash
+#!/bin/bash
 
 container_name="jacob_drone"
 user="user"
+# Paths used inside the container. The `docker run` in the README mounts the
+# workspace at the same path it has on the host, so the host-resolved values are
+# the defaults; set JL_DOCKER_WS_DIR / JL_DOCKER_PX4_DIR if you mount elsewhere.
+source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../jl_env.sh"
+WS_DIR="${JL_DOCKER_WS_DIR:-$JL_WS_ROOT}"
+PX4_DIR="${JL_DOCKER_PX4_DIR:-$JL_PX4_DIR}"
 
 # FastDDS profile to fix RTPS history errors on high-frequency PX4 topics
-FASTDDS_PROFILE="/home/cursedrock17/Documents/Electrical/Matrix_Lab/jacob_drone_ws/src/Jacob_Ladder/config/fastdds_profile.xml"
+FASTDDS_PROFILE="${WS_DIR}/config/fastdds_profile.xml"
 
 # Tab names
 tab_names=("DDS-Agent" "Aruco-Tracker" "Precision-Land")
 
 # Commands to run in each tab
 commands=(
-    #"cd /home/cursedrock17/Documents/Electrical/Matrix_Lab/jacob_drone_ws/src/Jacob_Ladder && source install/setup.bash && MicroXRCEAgent udp4 -p 8888"
-    #"cd /home/cursedrock17/Documents/Electrical/Matrix_Lab/jacob_drone_ws/src/Jacob_Ladder && source install/setup.bash && ros2 run translation_node translation_node_bin"
-    #"cd /home/cursedrock17/Documents/Electrical/Matrix_Lab/jacob_drone_ws/src/Jacob_Ladder && source install/setup.bash && ros2 launch aruco_tracker front_camera_aruco.launch.py"
-    "cd /home/cursedrock17/Documents/Electrical/Matrix_Lab/jacob_drone_ws/src/Jacob_Ladder && source install/setup.bash && ros2 launch jacob_manual front_approach.launch.py"
-    #"cd /home/cursedrock17/Documents/Electrical/Matrix_Lab/jacob_drone_ws/src/Jacob_Ladder && source install/setup.bash && ros2 launch precision_land takeoff_hold.launch.py"
-    #"cd /home/cursedrock17/Documents/Electrical/Matrix_Lab/jacob_drone_ws/src/Jacob_Ladder && source install/setup.bash && rviz2"
-    #"cd /home/cursedrock17/Documents/Electrical/Matrix_Lab/jacob_drone_ws/src/Jacob_Ladder && source install/setup.bash && ros2 launch precision_land blank_mode.launch.py"
+    #"cd ${WS_DIR} && source install/setup.bash && MicroXRCEAgent udp4 -p 8888"
+    #"cd ${WS_DIR} && source install/setup.bash && ros2 run translation_node translation_node_bin"
+    #"cd ${WS_DIR} && source install/setup.bash && ros2 launch aruco_tracker front_camera_aruco.launch.py"
+    "cd ${WS_DIR} && source install/setup.bash && ros2 launch jacob_manual front_approach.launch.py"
+    #"cd ${WS_DIR} && source install/setup.bash && ros2 launch precision_land takeoff_hold.launch.py"
+    #"cd ${WS_DIR} && source install/setup.bash && rviz2"
+    #"cd ${WS_DIR} && source install/setup.bash && ros2 launch precision_land blank_mode.launch.py"
 )
 
 # Start gnome-terminal with the first tab

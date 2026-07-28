@@ -24,13 +24,14 @@ Edit `/etc/gdm3/custom.conf`, in the `[daemon]` section set:
 
 ```ini
 AutomaticLoginEnable=true
-AutomaticLogin=usmsm
+AutomaticLogin=<the drone's login user>
 ```
 
-One-liner (only works if the stock commented lines are present):
+One-liner (only works if the stock commented lines are present) — uses the
+current user, so run it while logged in as the drone account:
 
 ```bash
-sudo sed -i 's/^#  AutomaticLoginEnable = true/AutomaticLoginEnable=true/; s/^#  AutomaticLogin = user1/AutomaticLogin=usmsm/' /etc/gdm3/custom.conf
+sudo sed -i "s/^#  AutomaticLoginEnable = true/AutomaticLoginEnable=true/; s/^#  AutomaticLogin = user1/AutomaticLogin=$USER/" /etc/gdm3/custom.conf
 ```
 
 ## 3. Permanent /dev/ttyUSB0 access (no sudo)
@@ -50,28 +51,26 @@ sudo udevadm trigger --subsystem-match=tty
 
 ## 4. XRCE-DDS agent + translation node as boot services
 
-Unit files and launch scripts live in `~/Jacob_Ladder/services/`. The units run
-as the local user and point at the scripts in the repo (single source of truth
-— edit in the repo, then re-copy the .service files and `daemon-reload`).
+Unit templates and launch scripts live in `Jacob_Ladder/services/`. The units run
+as the user who owns the workspace and point at the scripts in the repo (single
+source of truth — edit in the repo, then re-run the installer below).
 
-On a new drone, first fix the username/paths inside the four files if they
-differ (check `User=`, `Group=` in the `.service` files and the
-`cd /home/<user>/Jacob_Ladder` + `ExecStart=` paths):
-
-```bash
-cd ~/Jacob_Ladder/services
-sed -i "s|/home/OLDUSER/|/home/$USER/|g" run_dds_agent.sh run_translation_node.sh dds_agent.service translation_node.service
-sed -i "s/^User=.*/User=$USER/; s/^Group=.*/Group=$USER/" dds_agent.service translation_node.service
-chmod +x run_dds_agent.sh run_translation_node.sh
-```
-
-Then install and enable:
+No username or path is baked into git. The `run_*.sh` scripts resolve the
+workspace from their own location (via `jl_env.sh`), and the `.service.in`
+templates carry `@JL_WS_ROOT@` / `@JL_USER@` placeholders that
+`install_services.sh` fills in for the machine it runs on. So on a new drone
+there is nothing to `sed` — just install and enable:
 
 ```bash
-sudo cp dds_agent.service translation_node.service /etc/systemd/system/
-sudo systemctl daemon-reload
-sudo systemctl enable dds_agent.service translation_node.service
+cd ~/Jacob_Ladder
+./services/install_services.sh --dry-run   # inspect the generated units
+./services/install_services.sh             # render + install all of them
+sudo systemctl enable --now dds_agent.service translation_node.service
 ```
+
+Pass unit names to install a subset (`./services/install_services.sh dds_agent
+translation_node`), or set `JL_SERVICE_USER` / `JL_SERVICE_GROUP` to run them as
+somebody other than the workspace owner.
 
 Notes:
 - `dds_agent.service` runs `MicroXRCEAgent serial --dev /dev/ttyUSB0 -b 921600`.
@@ -79,8 +78,8 @@ Notes:
   the unit restarts every 5 s until it appears.
 - Camera / aruco / precision-land / cuVSLAM are still launched manually via
   `launch_scripts/super_real.sh` (tmux). Their service files
-  (`usb_cam.service`, `aruco_tracker.service`) exist in `services/` but were
-  not enabled in this setup.
+  (`usb_cam.service.in`, `aruco_tracker.service.in`) exist in `services/` but
+  were not enabled in this setup.
 - `super_real.sh` no longer launches the agent or translation node itself —
   its first two tmux windows just tail the systemd service logs
   (`journalctl -u ... -f`), so there's no duplicate-process risk.

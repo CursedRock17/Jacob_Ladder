@@ -14,11 +14,11 @@
 # Details: general_docs/reviewing_flight_data.md ("Watching live flight data")
 
 set -e
-cd "$(dirname "$0")/.."
-source /opt/ros/humble/setup.bash
-source install/setup.bash
+source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../jl_env.sh"
+cd "$JL_WS_ROOT"
+jl_source_ros
 
-export FASTRTPS_DEFAULT_PROFILES_FILE="$(pwd)/config/fastdds_wifi_profile.xml"
+export FASTRTPS_DEFAULT_PROFILES_FILE="$JL_WS_ROOT/config/fastdds_wifi_profile.xml"
 
 JPEG_QUALITY="${JPEG_QUALITY:-60}"
 

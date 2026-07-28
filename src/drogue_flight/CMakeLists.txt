@@ -42,4 +42,10 @@ install(DIRECTORY config
   DESTINATION share/${PROJECT_NAME}/
 )
 
+# YOLO weights: installed so nodes can find them via the package share directory
+# instead of an absolute path into somebody's home (see drogue_detection_node.py).
+install(DIRECTORY models
+  DESTINATION share/${PROJECT_NAME}/
+)
+
 ament_package()
