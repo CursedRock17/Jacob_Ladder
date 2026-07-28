@@ -44,7 +44,14 @@ export JL_VENV
 
 # Source /opt/ros/<distro> and the workspace overlay, if they exist.
 # Safe under `set -e`: a missing file is skipped, not an error.
+# Also safe under `set -u`: the ROS setup files read unset variables
+# (AMENT_TRACE_SETUP_FILES and friends), so nounset is relaxed while they run
+# and restored to whatever the caller had afterwards.
 jl_source_ros() {
+    local _jl_nounset=0
+    case "$-" in *u*) _jl_nounset=1 ;; esac
+    set +u
+
     if [ -f "/opt/ros/$JL_ROS_DISTRO/setup.bash" ]; then
         # shellcheck disable=SC1090
         source "/opt/ros/$JL_ROS_DISTRO/setup.bash"
@@ -55,6 +62,8 @@ jl_source_ros() {
     else
         echo "jl_env: $JL_WS_ROOT/install/setup.bash missing — build the workspace first" >&2
     fi
+
+    [ "$_jl_nounset" -eq 1 ] && set -u
     return 0
 }
 
