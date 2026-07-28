@@ -37,7 +37,7 @@ def generate_launch_description():
     #            name='recorder',
     #            parameters=[
     #                os.path.join(
-    #                    '/home/cursedrock17/Documents/Electrical/Matrix_Lab/jacob_drone_ws/src/Jacob_Ladder/src/precision_land/cfg/',
+    #                    os.path.join(get_package_share_directory('precision_land'), 'cfg'),
     #                    'recorder_params.yaml'
     #                )
     #            ],

@@ -1,7 +1,10 @@
+import os
+
 import rclpy
 from rclpy.node import Node
 from rclpy.executors import MultiThreadedExecutor
 from rclpy.qos import qos_profile_system_default, qos_profile_sensor_data
+from ament_index_python.packages import get_package_share_directory, PackageNotFoundError
 
 # MSG Libraries
 from sensor_msgs.msg import Image
@@ -22,6 +25,50 @@ from ultralytics import YOLO
 # Your stream/frame size (used by ranging center math)
 FRAME_W = 1024
 FRAME_H = 768
+
+
+def find_model(filename="yolov26.pt"):
+    """
+    Locate the YOLO weights without hardcoding anyone's home directory.
+
+    Search order:
+      1. $JL_DROGUE_MODEL — an explicit override (full path to a .pt file).
+      2. The installed drogue_flight share directory (colcon install space).
+      3. The source tree, walking up from this file until src/drogue_flight/
+         models/<filename> turns up — covers running straight out of a clone.
+
+    :params:
+        filename: Weights file to look for inside the models directory.
+    :returns:
+        Absolute path to the weights, or the bare filename so Ultralytics can
+        fall back to its own download/cache behaviour.
+    """
+    override = os.environ.get("JL_DROGUE_MODEL")
+    if override:
+        return override
+
+    try:
+        share = os.path.join(
+            get_package_share_directory("drogue_flight"), "models", filename
+        )
+        if os.path.isfile(share):
+            return share
+    except (PackageNotFoundError, KeyError):
+        pass
+
+    directory = os.path.dirname(os.path.abspath(__file__))
+    while True:
+        candidate = os.path.join(
+            directory, "src", "drogue_flight", "models", filename
+        )
+        if os.path.isfile(candidate):
+            return candidate
+        parent = os.path.dirname(directory)
+        if parent == directory:
+            break
+        directory = parent
+
+    return filename
 
 
 class DrogueDetectionNode(Node):
@@ -45,7 +92,7 @@ class DrogueDetectionNode(Node):
         # classes {0: Coupler, 1: Drogue} — same IDs as the older best.pt).
         self.MODEL_FILEPATH = self.declare_parameter(
             "model_path",
-            "/home/usmsm/Jacob_Ladder/src/drogue_flight/models/yolov26.pt",
+            find_model("yolov26.pt"),
         ).value
         self.IMGSZ = 416
         self.CONF = 0.25

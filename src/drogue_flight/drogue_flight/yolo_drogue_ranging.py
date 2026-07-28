@@ -5,6 +5,7 @@ Created on Wed Jan 21 11:53:52 2026
 @author: rllow
 """
 
+import os
 import time
 import threading
 from typing import Any
@@ -21,7 +22,12 @@ import json
 # RTSP + MODEL SETTINGS
 # =========================
 RTSP_URL = "rtsp://127.0.0.1:8900/live"
-MODEL_PATH = "../models/best.pt"
+# Resolved against this file, not the caller's working directory, so the script
+# runs from anywhere. Override with JL_DROGUE_MODEL=/path/to/weights.pt
+MODEL_PATH = os.environ.get(
+    "JL_DROGUE_MODEL",
+    os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "models", "best.pt"),
+)
 
 IMGSZ = 416
 CONF = 0.25

@@ -243,9 +243,23 @@ Select the precision landing mode from the QGroundControl dropdown:
 | `real_launch.sh` | *(edit before use)* | Real hardware | DDS agent + RViz shell for Jetson/Pixhawk flight testing — all mode commands are commented out so you can uncomment the one you want |
 | `fake_drogue.sh` | *(no flight mode)* | Real hardware | Drogue camera feed sanity check — runs the DDS agent and `ros2 topic hz` on the camera topic |
 
-Every script follows the same shape: the first tab is PX4 SITL (or omitted for real hardware), then the DDS agent, the translation node, any trackers, and the mode itself. If a script doesn't match your container name, workspace path, or PX4 version, open it and edit the `container_name` and path variables at the top — they're the same in every script.
+Every script follows the same shape: the first tab is PX4 SITL (or omitted for real hardware), then the DDS agent, the translation node, any trackers, and the mode itself. If a script doesn't match your container name or PX4 version, open it and edit the `container_name` variable at the top — it's the same in every script.
 
-> **Note:** Most scripts use the absolute path `/home/user/jacob_ladder_ws/...` hardcoded in them. Update these paths to match your own machine before running.
+> **Paths:** no script hardcodes a home directory. Each one sources `jl_env.sh` from the repo root, which derives the workspace root from its own location, so a clone works under any username at any path. Override any of these in the environment when the defaults don't fit:
+>
+> | Variable | Default |
+> |---|---|
+> | `JL_WS_ROOT` | directory containing `jl_env.sh` (this repo) |
+> | `JL_PX4_DIR` | `PX4-Autopilot` beside or inside the workspace, else `~/PX4-Autopilot` |
+> | `JL_ROS_DISTRO` | `$ROS_DISTRO`, else `humble` |
+> | `JL_VENV` | `$JL_WS_ROOT/.venv` |
+> | `JL_DOCKER_WS_DIR` / `JL_DOCKER_PX4_DIR` | the host paths above — set these if the container mounts them elsewhere |
+> | `JL_TRACKTOR_BEAM_DIR` | `tracktor-beam` beside the workspace, else under `$HOME` |
+> | `JL_DROGUE_MODEL` | YOLO weights from the installed `drogue_flight` share dir, else the source tree |
+>
+> The systemd units are templates (`services/*.service.in`) rendered by
+> `./services/install_services.sh`, which fills in the real workspace path and
+> owning user for the machine it runs on.
 
 ### Launch Script Options
 

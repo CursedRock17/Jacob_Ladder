@@ -6,7 +6,8 @@
   exported only for the MicroXRCEAgent process). Export this one per-process for
   ROS 2 nodes / foxglove_bridge:
 
-      export FASTRTPS_DEFAULT_PROFILES_FILE=/home/usmsm/Jacob_Ladder/config/fastdds_wifi_profile.xml
+      source /path/to/Jacob_Ladder/jl_env.sh
+      export FASTRTPS_DEFAULT_PROFILES_FILE="$JL_WS_ROOT/config/fastdds_wifi_profile.xml"
 
   launch_scripts/foxglove_wifi.sh does this for the viewing stack.
   Rationale and measurements: general_docs/comms_latency.md

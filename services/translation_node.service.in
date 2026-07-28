@@ -4,9 +4,10 @@ After=network-online.target
 
 [Service]
 Type=simple
-User=usmsm
-Group=usmsm
-ExecStart=/bin/bash /home/usmsm/Jacob_Ladder/services/run_translation_node.sh
+User=@JL_USER@
+Group=@JL_GROUP@
+WorkingDirectory=@JL_WS_ROOT@
+ExecStart=/bin/bash @JL_WS_ROOT@/services/run_translation_node.sh
 Restart=on-failure
 RestartSec=5s
 StandardOutput=journal

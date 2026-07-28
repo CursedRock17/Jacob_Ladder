@@ -123,5 +123,9 @@ export OPENBLAS_CORETYPE=ARMV8
 export LD_LIBRARY_PATH=/usr/local/lib:$LD_LIBRARY_PATH
 export PATH="$PATH:/opt/nvim/"
 
-# Easier Setup on each of our sourcing
-cd /home/usmsm/Jacob_Ladder/ && source install/setup.bash && source .venv/bin/activate
+# Easier Setup on each of our sourcing.
+# Set JL_WS_ROOT before this block if your clone is not at ~/Jacob_Ladder.
+: "${JL_WS_ROOT:=$HOME/Jacob_Ladder}"
+if [ -f "$JL_WS_ROOT/jl_env.sh" ]; then
+    cd "$JL_WS_ROOT" && source "$JL_WS_ROOT/jl_env.sh" && jl_source_ros && jl_source_venv
+fi

@@ -34,7 +34,7 @@ Each launch file starts three things automatically:
 # 1. Make sure PX4 SITL and the DDS agent are running first
 
 # 2. Source the workspace
-cd ~/Documents/Electrical/Matrix_Lab/jacob_drone_ws/src/Jacob_Ladder
+cd /path/to/Jacob_Ladder
 source install/setup.bash
 
 # 3. Launch a mode (example: TakeoffLand)
