@@ -10,4 +10,4 @@ source install/setup.bash
 #   /dev/ttyTHS1  — Jetson 40-pin header UART: pins 8 (TX) / 10 (RX) / 6 (GND)
 # Override via the environment (e.g. a `systemctl edit dds_agent` drop-in with
 # `Environment=XRCE_DEV=/dev/ttyTHS1`); see DRONE_SETUP.md.
-MicroXRCEAgent serial --dev "${XRCE_DEV:-/dev/ttyUSB0}" -b "${XRCE_BAUD:-921600}"
+MicroXRCEAgent serial --dev "${XRCE_DEV:-/dev/ttyTHS1}" -b "${XRCE_BAUD:-921600}"
