@@ -12,9 +12,14 @@ set -euo pipefail
 export DEBIAN_FRONTEND=noninteractive
 ROS_DISTRO=humble
 
-# Source ROS so ${ROS_DISTRO} variable resolves correctly in apt package names
-# shellcheck disable=SC1091
-source /opt/ros/${ROS_DISTRO}/setup.bash
+# Source ROS so ${ROS_DISTRO} variable resolves correctly in apt package names.
+# ROS setup files reference unset variables, so relax `set -u` while sourcing.
+if [ -f /opt/ros/${ROS_DISTRO}/setup.bash ]; then
+    set +u
+    # shellcheck disable=SC1091
+    source /opt/ros/${ROS_DISTRO}/setup.bash
+    set -u
+fi
 
 echo ">>> [04] Installing drone ROS 2 packages..."
 apt-get update && apt-get -y --quiet --no-install-recommends install \
