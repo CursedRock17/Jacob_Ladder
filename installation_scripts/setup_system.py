@@ -1,6 +1,35 @@
 #!/usr/bin/env python3
 """Reproducible, resumable system setup for a Jacob's Ladder Jetson.
 
+=============================================================================
+USE AT YOUR OWN RISK -- THIS SCRIPT HAS NEVER BEEN RUN END TO END
+=============================================================================
+
+It was reconstructed after the fact from the shell history of one machine that
+was set up by hand, plus the steps taken in the session that wrote it. It has
+only ever been validated with `--list` and `--dry-run` against a box that was
+*already* fully configured. Every `check()` has been exercised; most `action()`
+bodies have not.
+
+That means, concretely:
+
+  * Steps satisfied on the reference machine -- `ark-os`, `imu-driver`,
+    `apt-base` and others -- have never actually executed from this script.
+  * The ordering is inferred from an interactive history in which the operator
+    backtracked, retried and rebooted. Real dependencies may differ.
+  * `ark-os` runs a third-party installer that reconfigures networking, systemd
+    units and the flight stack. This script does not constrain what it does.
+  * Several steps are destructive or hard to undo (apt upgrades, a udev rule,
+    systemd units, disabling ARK's DDS agent).
+
+Run it on a board you are willing to reflash, not on a drone you are about to
+fly. Start with `--list` and `--dry-run`, then work through it a step at a time
+with `--only`. Read what a step will do before letting it run unattended.
+
+Please fix this docstring as steps get proven on real hardware.
+
+=============================================================================
+
 Reconstructed from the shell history of the reference build (an ARK Electronics
 Jetson Orin NX image), starting at the first command run on a freshly flashed
 board -- `sudo apt update`. Everything before that point is what the
@@ -30,16 +59,44 @@ Usage
     ./setup_system.py --from workspace       # run from this step onward
     ./setup_system.py --skip brave --skip lazygit
     ./setup_system.py --include-optional     # also run developer-convenience steps
+
+Unattended operation
+--------------------
+Steps need sudo, and sudo cannot prompt when there is no terminal. Supply the
+password out of band and the script will run without a human:
+
+    ./setup_system.py --unattended --sudo-password-file ~/.jl-sudo    # file, mode 0600
+    JL_SUDO_PASSWORD=... ./setup_system.py --unattended               # environment
+
+`--unattended` also skips the steps that need a human at the keyboard (the
+jetson-io TUI, `gh auth login`) instead of blocking on them forever; it reports
+which ones it skipped so you can do them afterwards.
+
+There is deliberately no `--sudo-password=` flag. Command-line arguments are
+visible to every user on the box via `ps` and land in your shell history. A file
+is the best of the options here: create it with `install -m 600 /dev/null
+~/.jl-sudo`, write the password into it, and delete it when you are done. The
+environment variable is convenient but is readable via /proc for your own
+processes and tends to leak into logs and CI transcripts.
+
+The password is never passed on a command line internally either. It is written
+to a mode-0600 file inside a mode-0700 private directory, exposed to sudo
+through SUDO_ASKPASS, and both are overwritten and removed when the script
+exits.
 """
 
 from __future__ import annotations
 
 import argparse
+import atexit
+import getpass
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
+import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Optional
@@ -86,12 +143,116 @@ if not sys.stdout.isatty():
 
 
 # --------------------------------------------------------------------------- #
+# Unattended sudo
+#
+# sudo cannot prompt without a terminal, so an unattended run needs the password
+# supplied out of band. SUDO_ASKPASS is the mechanism designed for this: sudo -A
+# executes a helper program and reads the password from its stdout. That keeps
+# the secret off every command line, including our own.
+#
+# Note this only covers `sudo` invocations *this script* issues, which is why
+# they are rewritten to `sudo -A`. Steps that hand a whole shell script to sudo
+# (`sudo bash base_tools.sh`) are already covered: the nested sudo calls inside
+# those scripts run as root, where sudo needs no password at all.
+# --------------------------------------------------------------------------- #
+
+_ASKPASS_DIR: Optional[Path] = None
+
+
+def _shred(path: Path) -> None:
+    """Overwrite before unlinking so the secret does not linger in free blocks."""
+    try:
+        size = path.stat().st_size
+        with open(path, "r+b", buffering=0) as fh:
+            fh.write(b"\0" * size)
+            fh.flush()
+            os.fsync(fh.fileno())
+    except OSError:
+        pass
+    path.unlink(missing_ok=True)
+
+
+def _cleanup_askpass() -> None:
+    global _ASKPASS_DIR
+    if _ASKPASS_DIR is None or not _ASKPASS_DIR.exists():
+        return
+    for child in _ASKPASS_DIR.iterdir():
+        _shred(child)
+    try:
+        _ASKPASS_DIR.rmdir()
+    except OSError:
+        pass
+    _ASKPASS_DIR = None
+
+
+def enable_unattended_sudo(password: str) -> None:
+    """Install a SUDO_ASKPASS helper so sudo never needs a terminal."""
+    global _ASKPASS_DIR
+    _ASKPASS_DIR = Path(tempfile.mkdtemp(prefix="jl-setup-"))
+    os.chmod(_ASKPASS_DIR, 0o700)
+    atexit.register(_cleanup_askpass)
+
+    # The password lives in its own file rather than inside the helper script,
+    # so no quoting or delimiter in the password can break the helper.
+    pw_file = _ASKPASS_DIR / "pw"
+    pw_file.touch(mode=0o600)
+    pw_file.write_text(password + "\n")
+    os.chmod(pw_file, 0o600)
+
+    helper = _ASKPASS_DIR / "askpass.sh"
+    helper.write_text(f'#!/bin/sh\nexec cat {pw_file}\n')
+    os.chmod(helper, 0o700)
+
+    os.environ["SUDO_ASKPASS"] = str(helper)
+
+    # Fail fast on a wrong password rather than 40 minutes into an OpenCV build.
+    if not ok("sudo -A -n true 2>/dev/null || sudo -A true"):
+        _cleanup_askpass()
+        raise SystemExit(
+            f"{RED}error{RESET}: the supplied sudo password was rejected."
+        )
+
+
+def resolve_sudo_password(args) -> Optional[str]:
+    """Password from --sudo-password-file, then $JL_SUDO_PASSWORD, then a prompt."""
+    if args.sudo_password_file:
+        path = Path(args.sudo_password_file).expanduser()
+        if not path.exists():
+            raise SystemExit(f"{RED}error{RESET}: {path} does not exist")
+        mode = path.stat().st_mode & 0o077
+        if mode:
+            print(f"{YELLOW}warning{RESET}: {path} is readable by others "
+                  f"(mode {oct(path.stat().st_mode & 0o777)}); "
+                  f"consider chmod 600")
+        return path.read_text().splitlines()[0]
+
+    env_pw = os.environ.get("JL_SUDO_PASSWORD")
+    if env_pw:
+        return env_pw
+
+    if args.unattended:
+        raise SystemExit(
+            f"{RED}error{RESET}: --unattended needs a sudo password. Use "
+            f"--sudo-password-file or $JL_SUDO_PASSWORD (see --help)."
+        )
+    return None
+
+
+# --------------------------------------------------------------------------- #
 # Shell helpers
 # --------------------------------------------------------------------------- #
+
+# Matches a bare `sudo` token so it can become `sudo -A`. Avoids touching an
+# already-rewritten `sudo -A`, and the lookbehind keeps it from firing on
+# things like `no-sudo` or a path ending in "sudo".
+_SUDO_RE = re.compile(r"(?<![\w./-])sudo (?!-A\b)")
+
 
 def run(cmd: str, *, check: bool = True, cwd: Optional[Path] = None,
         env: Optional[dict] = None) -> subprocess.CompletedProcess:
     """Run a shell command, streaming its output."""
+    if _ASKPASS_DIR is not None:
+        cmd = _SUDO_RE.sub("sudo -A ", cmd)
     print(f"{DIM}$ {cmd}{RESET}")
     merged = {**os.environ, **(env or {})}
     return subprocess.run(cmd, shell=True, cwd=cwd, env=merged, check=check)
@@ -586,6 +747,16 @@ def main() -> int:
     ap.add_argument("--include-optional", action="store_true")
     ap.add_argument("--force", action="store_true",
                     help="run steps even if their check reports satisfied")
+    ap.add_argument("--unattended", action="store_true",
+                    help="never prompt: requires a sudo password, and skips "
+                         "the steps that need a human at the keyboard")
+    ap.add_argument("--sudo-password-file", metavar="PATH",
+                    help="file whose first line is the sudo password "
+                         "(create with `install -m 600 /dev/null PATH`). "
+                         "There is no --sudo-password flag on purpose: "
+                         "arguments are visible in ps and shell history.")
+    ap.add_argument("--accept-risk", action="store_true",
+                    help="suppress the untested-script banner")
     args = ap.parse_args()
 
     if os.geteuid() == 0:
@@ -606,6 +777,26 @@ def main() -> int:
         print_listing(state)
         return 0
 
+    if not args.accept_risk:
+        print(f"\n{RED}{BOLD}  USE AT YOUR OWN RISK{RESET}")
+        print(f"{YELLOW}  This script has never been run end to end. It was "
+              f"reconstructed from{RESET}")
+        print(f"{YELLOW}  one machine's shell history and validated only with "
+              f"--list and --dry-run{RESET}")
+        print(f"{YELLOW}  against an already-configured box. Some steps are "
+              f"destructive and hard{RESET}")
+        print(f"{YELLOW}  to undo. Use a board you can reflash, not a drone "
+              f"you are about to fly.{RESET}")
+        print(f"{DIM}  See the module docstring for detail; --accept-risk "
+              f"hides this.{RESET}\n")
+
+    # Unattended sudo must be armed before any step runs.
+    password = resolve_sudo_password(args)
+    if password:
+        enable_unattended_sudo(password)
+        print(f"{GREEN}ok{RESET}   sudo password accepted; running unattended")
+    del password
+
     selected = STEPS
     if args.start_at:
         idx = next(i for i, s in enumerate(STEPS) if s.name == args.start_at)
@@ -613,12 +804,20 @@ def main() -> int:
     if args.only:
         selected = [s for s in STEPS if s.name in args.only]
 
+    deferred_interactive: list[str] = []
+
     for s in selected:
         if s.name in args.skip:
             print(f"{DIM}skip {s.name} (--skip){RESET}")
             continue
         if s.optional and not args.include_optional and not args.only:
             print(f"{DIM}skip {s.name} (optional; --include-optional to run){RESET}")
+            continue
+        # An interactive step would block forever with nobody at the keyboard.
+        if args.unattended and s.interactive and not s.satisfied(state):
+            print(f"{YELLOW}defer{RESET} {s.name} "
+                  f"{DIM}(interactive; needs a human){RESET}")
+            deferred_interactive.append(s.name)
             continue
         # --only implies you want it run regardless of its check.
         if not args.force and not args.only and s.satisfied(state):
@@ -653,6 +852,13 @@ def main() -> int:
             print(f"\n{YELLOW}This step requires a reboot.{RESET}")
             print(f"Reboot, then resume with:\n    {sys.argv[0]}")
             return 0
+
+    if deferred_interactive:
+        print(f"\n{YELLOW}{BOLD}Deferred -- these need a human at the keyboard:"
+              f"{RESET}")
+        for name in deferred_interactive:
+            print(f"    {sys.argv[0]} --only {name}")
+        print(f"{DIM}Setup is not finished until those are done.{RESET}")
 
     print(f"\n{GREEN}{BOLD}Setup complete.{RESET}")
     print("Verify with:")
