@@ -56,6 +56,12 @@ cd ~ && git clone https://github.com/CursedRock17/Jacob_Ladder.git -b drogue_col
 
 We'll need to add in our desired packages to get this drone off the ground and into the air. The simulation portion of Jacob's Ladder is all dockerized, maybe that will need to be the case for drones, depending on what the project needs (TODO: Maybe dockerize setup), until then we've provided some shell scripts that will recreate the docker installation.
 1) Enter the Jacob_Ladder repository on the Jetson
+1a) Apply the vendored-library patch — `git apply patch.diff` from the repo root.
+    It adds `setSkipMessageCompatibilityCheck()` to `ModeExecutorBase` in the
+    `px4-ros2-interface-lib` submodule; without it `precision_land`,
+    `drogue_flight` and `jacob_manual` will not compile. Any
+    `git submodule update` reverts it, so re-apply after one. See the
+    [README](../README.md#3-clone-jacobs-ladder) for the check-if-applied one-liner.
 2) Navigate to the [Installation Scripts Directory](../installation_scripts) and make sure all of the shell scripts have permissions `chmod +x *.sh`
 3) Assert that you have the correct permissions on the Jetson, otherwise you have to run all commands with `sudo`:
     ```bash
@@ -67,9 +73,28 @@ We'll need to add in our desired packages to get this drone off the ground and i
 4) Ensure the packages all have permissions: `sudo chmod +x *.sh` other wise run each command with `sudo`.
 4) Install the base tools first: `./base_tools.sh`
 5) Install the ROS 2 Humble Ecosystem: `./ros2_humble.sh`
-6) Install the OpenCV Packages: `./install_opencv.sh`
+6) Install the OpenCV Packages: `REMOVE_DEFAULT_OPENCV=no ./install_opencv.sh`
+
+    This builds a CUDA-enabled OpenCV from source and is the single longest step
+    (60–120 minutes on an Orin NX, ~10 GB of disk). **Do not skip it and do not
+    try to use the OpenCV that ships with the ARK Electronics / JetPack image** —
+    that one has no CUDA support *and* no contrib modules, so `aruco_tracker`
+    will not even compile against it. Full explanation, environment variables,
+    and the required `colcon` flags are in the
+    [OpenCV on the Jetson](../README.md#opencv-on-the-jetson) section of the
+    top-level README.
+
+    Answer `no` if it asks whether to remove the default OpenCV (which is what
+    `REMOVE_DEFAULT_OPENCV=no` above does for you) — purging it takes
+    `ros-humble-cv-bridge` and the rest of `image_pipeline` with it. If cmake
+    fails to detect cuDNN, re-run with `OPENCV_WITH_CUDNN=OFF`; nothing in this
+    repo needs it.
 7) Install the Drone packages to work with ros2: `./drone_packages.sh`
 8) Install the Python packages for our Python environment: `./python_packages.sh`
+
+   Note that `opencv-python` is intentionally **not** installed — the CPU-only
+   pip wheel would shadow the CUDA build from step 6. See the README section
+   linked above.
 
 
 #### Additional Packages:

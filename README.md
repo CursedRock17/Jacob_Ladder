@@ -25,8 +25,11 @@ source install/setup.bash  # after colcon build
 ```
 
 That's it — `uv sync` installs everything, including the YOLO/drogue
-image-processing stack (`torch`, `torchvision`, `ultralytics`, `opencv-python`).
-There is no extra to enable and no bootstrap script to run.
+image-processing stack (`torch`, `torchvision`, `ultralytics`). There is no extra
+to enable and no bootstrap script to run.
+
+`opencv-python` is deliberately **not** installed — see
+[OpenCV on the Jetson](#opencv-on-the-jetson) below.
 
 On JetPack 6.2 / CUDA 12.6 (aarch64), `uv sync` pulls the pinned CUDA-enabled
 `torch` and `torchvision` wheels from
@@ -39,6 +42,107 @@ install steps are required — `uv sync` (or `uv run ...`) is enough.
 The only reason to pass `--system-site-packages` when creating the venv is so
 ROS 2, `cv_bridge`, and JetPack OpenCV stay visible inside it. If you re-create
 the venv, keep that flag.
+
+## OpenCV on the Jetson
+
+**The OpenCV that ships with the ARK Electronics / JetPack image cannot build or
+run this workspace.** You must build the CUDA-enabled one with
+`installation_scripts/install_opencv.sh`.
+
+A stock ARK JetPack 6.2 image has three OpenCVs on it, and none of them work:
+
+| Install | Version | Location | CUDA | contrib `aruco` |
+|---|---|---|---|---|
+| Ubuntu debs (ROS Humble links these) | 4.5.4d | `/usr/lib/aarch64-linux-gnu` | no | no |
+| JetPack/ARK `nvidia-opencv` | 4.8.0 | `/usr/lib`, headers in `/usr/include/opencv4` | **no** | **no** |
+| `opencv-python` pip wheel | 4.9.0.80 | venv `site-packages` | **no** | n/a |
+
+Three concrete problems:
+
+1. **No CUDA.** `/usr/include/opencv4/opencv2/cvconfig.h` contains
+   `/* #undef HAVE_CUDA */`, and there is no `libopencv_cuda*.so` anywhere on the
+   image. `cv2.cuda.getCudaEnabledDeviceCount()` returns `0`.
+2. **No contrib modules, so `aruco_tracker` cannot compile.** It does
+   `find_package(OpenCV 4 REQUIRED COMPONENTS core imgproc calib3d aruco)` and
+   includes `<opencv2/aruco.hpp>`. The JetPack build only has the core-repo
+   subset (`opencv2/objdetect/aruco_detector.hpp`) — no `aruco.hpp`, no
+   `libopencv_aruco`.
+3. **A broken pkg-config file.** `/usr/lib/pkgconfig/opencv4.pc` from
+   `nvidia-opencv-dev` declares `prefix=/usr/local`, but nothing OpenCV is
+   installed there. Any pkg-config-driven build gets `-L/usr/local/lib
+   -lopencv_core` and fails to link. Installing to `/usr/local` (the default
+   below) incidentally makes that file correct again.
+
+### Building it
+
+```bash
+REMOVE_DEFAULT_OPENCV=no OPENCV_BUILD_JOBS=6 ./installation_scripts/install_opencv.sh
+```
+
+Takes roughly 60–120 minutes on an 8-core Orin NX and needs ~10 GB of disk. It
+needs `sudo` for the apt step and `make install`, so run it interactively.
+
+**Answer `no` to the "remove the default OpenCV" prompt** (or pass
+`REMOVE_DEFAULT_OPENCV=no` as above). `apt purge *libopencv*` would take
+`ros-humble-cv-bridge`, `ros-humble-image-geometry` and the rest of
+`image_pipeline` with it, since they link `libopencv_*.so.4.5d`.
+
+Useful environment variables:
+
+| Variable | Default | Notes |
+|---|---|---|
+| `OPENCV_VERSION` | `4.10.0` | |
+| `OPENCV_CUDA_ARCH` | `8.7` | Orin NX / Orin Nano / AGX Orin are all `sm_87`. Use `7.2` for Xavier. Listing only your arch roughly halves build time. |
+| `OPENCV_WITH_CUDNN` | `ON` | Set `OFF` if cmake fails to detect cuDNN. JetPack 6.2 ships cuDNN 9, which older OpenCV releases mis-detect. Nothing here needs it — YOLO runs inference through torch, not `cv2.dnn`. |
+| `OPENCV_BUILD_JOBS` | `nproc - 1` | Lower it if the build gets OOM-killed. |
+| `OPENCV_PYTHON_VENV` | repo `.venv` | Where the `cv2` bindings are installed. |
+| `OPENCV_INSTALL_PREFIX` | `/usr/local` | |
+
+The script verifies itself at the end: it checks that the `cv2` the venv actually
+imports is the version just built and that
+`cv2.cuda.getCudaEnabledDeviceCount() >= 1`, and exits non-zero otherwise. If it
+reports a *different* version than it just built, something on `sys.path` is
+shadowing the build — almost always the `opencv-python` pip wheel (`uv pip
+uninstall opencv-python`) or the system `python3-opencv` deb.
+
+Re-running the script is incremental: it keeps `~/opencv_src` and its `release/`
+build directory, so a second run only compiles what changed. Set
+`OPENCV_CLEAN_BUILD=1` to force a full rebuild.
+
+The script installs the `cv2` Python bindings **directly into the repo venv's
+`site-packages`**, because OpenCV's default
+`${prefix}/lib/python3.10/site-packages` is invisible to a venv. Venv
+`site-packages` precedes `/usr/lib/python3/dist-packages` on `sys.path`, so this
+build wins `import cv2` over the system 4.5.4 deb.
+
+### Why `opencv-python` is not a dependency
+
+The pip wheel is CPU-only and lives in the same `site-packages` the script writes
+`cv2` into, so it shadows the CUDA build and silently disables GPU acceleration
+for every `cv2` call. It is therefore excluded from `pyproject.toml` twice over:
+it is not a direct dependency, and because `ultralytics` requires it
+unconditionally, `[tool.uv] override-dependencies` drops the transitive
+requirement with a never-true marker.
+
+If you are working on a machine without the CUDA build, install it by hand:
+
+```bash
+uv pip install opencv-python
+```
+
+### Building the workspace against it
+
+Tell colcon which OpenCV to use, so you don't get the JetPack 4.8.0 by accident:
+
+```bash
+colcon build --cmake-args -DOpenCV_DIR=/usr/local/lib/cmake/opencv4
+```
+
+The workspace vendors `src/vision_opencv`, so `cv_bridge` and `image_geometry`
+are rebuilt against the same OpenCV as everything else. Make sure
+`install/setup.bash` is sourced *after* `/opt/ros/humble/setup.bash` so the
+overlay shadows the 4.5-linked debs — loading two OpenCV ABIs into one process
+causes crashes that look random.
 
 START HERE:
 
@@ -144,7 +248,32 @@ git clone https://github.com/CursedRock17/Jacob_Ladder.git
 cd Jacob_Ladder
 git checkout drogue_collector
 git submodule update --init --recursive
+git apply patch.diff        # required -- see below
 ```
+
+**`patch.diff` is not optional.** It patches the `px4-ros2-interface-lib`
+submodule to add `setSkipMessageCompatibilityCheck()` (and its backing flag) to
+`ModeExecutorBase`, which upstream only provides on `ModeBase`. Several of our
+mode executors call it, so without the patch `precision_land`, `drogue_flight`
+and `jacob_manual` fail to compile with:
+
+```
+error: 'setSkipMessageCompatibilityCheck' was not declared in this scope
+```
+
+Because it modifies a submodule's working tree, `git submodule update` — and any
+re-clone or submodule reset — reverts it and you must re-apply. Check whether it
+is currently applied with:
+
+```bash
+grep -q _skip_message_compatibility_check \
+  src/px4-ros2-interface-lib/px4_ros2_cpp/include/px4_ros2/components/mode_executor.hpp \
+  && echo applied || echo "NOT applied - run: git apply patch.diff"
+```
+
+Note that the patch's guard short-circuits `waitForFMU()` as well as
+`messageCompatibilityCheck()`, so an executor that skips the check also does not
+wait for the FMU before registering.
 
 ### 4. Set Up Docker
 

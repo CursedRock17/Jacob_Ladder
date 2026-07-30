@@ -70,16 +70,67 @@ sudo systemctl enable --now dds_agent.service translation_node.service
 
 Pass unit names to install a subset (`./services/install_services.sh dds_agent
 translation_node`), or set `JL_SERVICE_USER` / `JL_SERVICE_GROUP` to run them as
-somebody other than the workspace owner.
+somebody other than the workspace owner. `--enable` installs *and* enables and
+starts in one go.
+
+Alongside the units, the installer also puts in place the two things they depend
+on: the `99-oak-usb-power.rules` udev rule, and `/var/log/ros2` (which
+`aruco_tracker.service` sets `ROS_LOG_DIR` to — rclcpp will not create it, and
+the unit runs as a non-root user that cannot create it under `/var/log`).
+
+### ⚠ Conflict: the ARK image ships its own XRCE-DDS agent
+
+**The ARK Electronics Jetson image already runs an XRCE-DDS agent, and it will
+fight ours over the serial port.** Theirs is a *user*-level unit:
+
+| | ARK's | Ours |
+|---|---|---|
+| unit | `dds-agent.service` (hyphen), user-level | `dds_agent.service` (underscore), system-level |
+| enabled by default | yes | no |
+| launcher | `~/.local/bin/start_dds_agent.sh` | `services/run_dds_agent.sh` |
+| binary | eProsima snap, via `/usr/local/bin/MicroXRCEAgent` | `install/microxrcedds_agent/bin/MicroXRCEAgent` |
+| command | `MicroXRCEAgent serial -b 3000000 -D /dev/ttyTHS1` | `MicroXRCEAgent serial --dev $XRCE_DEV -b $XRCE_BAUD` (default `/dev/ttyTHS1` @ 921600) |
+
+Because the names differ and one is user-level while the other is system-level,
+systemd sees two unrelated units and will happily run both. They then open the
+same `/dev/ttyTHS1` at **different baud rates**; whichever loses the race either
+fails to open the port or garbles the link. **Run exactly one.**
+
+```bash
+# check what is running right now
+systemctl --user status dds-agent.service
+ps aux | grep MicroXRCEAgent
+
+# option A - keep ARK's: just never enable ours
+# option B - keep ours:
+systemctl --user disable --now dds-agent.service
+sudo systemctl enable --now dds_agent.service
+```
+
+`install_services.sh` detects this: it warns if ARK's agent is enabled or active,
+and refuses `--enable dds_agent` outright rather than creating the race.
+
+Whichever you keep, **its baud must match the flight controller's
+`SER_TEL2_BAUD`.** ARK's launcher hardcodes 3000000; ours defaults to 921600 and
+is overridable via `XRCE_BAUD`. A mismatch looks exactly like dead wiring.
 
 Notes:
-- `dds_agent.service` runs `MicroXRCEAgent serial --dev /dev/ttyUSB0 -b 921600`.
-  No sudo needed thanks to step 3. If the flight controller isn't plugged in,
-  the unit restarts every 5 s until it appears.
+- `dds_agent.service` runs
+  `MicroXRCEAgent serial --dev "${XRCE_DEV:-/dev/ttyTHS1}" -b "${XRCE_BAUD:-921600}"`.
+  The default device is the **GPIO UART** `/dev/ttyTHS1`, not `/dev/ttyUSB0` —
+  set `XRCE_DEV=/dev/ttyUSB0` via a `systemctl edit dds_agent` drop-in to go back
+  to the USB-TTL adapter. No sudo needed thanks to step 3. If the flight
+  controller isn't plugged in, the unit restarts every 5 s until it appears.
 - Camera / aruco / precision-land / cuVSLAM are still launched manually via
   `launch_scripts/super_real.sh` (tmux). Their service files
   (`usb_cam.service.in`, `aruco_tracker.service.in`) exist in `services/` but
   were not enabled in this setup.
+- `usb_cam.service` runs the OAK-D visual-odometry publisher, not a USB camera
+  driver — the unit name is historical. Until 2026-07-30 `run_usb_cam.sh` named
+  `vo_publisher_px4_node`, which has never existed, so the unit failed with
+  `No executable found` and restarted every 5 s; it now runs
+  `cuvslam_publisher_px4_node`. Cross-check against
+  `ros2 pkg executables oak_d_visual_odometry` if it ever misbehaves again.
 - `super_real.sh` no longer launches the agent or translation node itself —
   its first two tmux windows just tail the systemd service logs
   (`journalctl -u ... -f`), so there's no duplicate-process risk.
@@ -142,7 +193,7 @@ timeout 3 cat /dev/ttyTHS1 | xxd | head    # non-zero bytes = link is live
 
 ### Point the agent at `ttyTHS1`
 
-The service device is set by `XRCE_DEV` (default `/dev/ttyUSB0`). Quick manual run:
+The service device is set by `XRCE_DEV` (default `/dev/ttyTHS1`). Quick manual run:
 
 ```bash
 XRCE_DEV=/dev/ttyTHS1 bash ~/Jacob_Ladder/services/run_dds_agent.sh
@@ -234,12 +285,47 @@ RX). The `useful_commands.txt` snippet is not a valid check here — it uses
 
 ## 5. Reboot and verify
 
+### Current boot configuration (as of 2026-07-30)
+
+| Unit | Boot | Why |
+|---|---|---|
+| `dds_agent.service` | **enabled** | the XRCE-DDS link to the FC, `/dev/ttyTHS1` @ 921600 |
+| `translation_node.service` | **enabled** | PX4 message translation |
+| `aruco_tracker.service` | disabled | grabs a camera; launched via `super_real.sh` instead |
+| `usb_cam.service` | disabled | grabs the OAK-D; would fight `super_real.sh` |
+| `dds-agent.service` (ARK's, user-level) | **disabled** | conflicts — see the warning in section 4 |
+
 ```bash
 sudo reboot
 # after boot:
 nmcli connection show --active            # Hotspot active
 systemctl status dds_agent translation_node
 journalctl -u dds_agent -u translation_node -f
-ls -l /dev/ttyUSB0                        # crw-rw-rw-
+ls -l /dev/ttyTHS1                        # crw-rw---- root:dialout
 groups | grep dialout
+
+# exactly one agent, and it must be the system one:
+pgrep -ax MicroXRCEAgent
+systemctl --user is-enabled dds-agent.service   # expect: disabled
 ```
+
+### Confirming the FC link is actually up
+
+**`ros2 topic list` showing `/fmu/*` topics does NOT mean the link works.**
+`translation_node` registers those topic names itself the moment it starts, so
+they appear even with the flight controller unplugged. This is an easy way to
+convince yourself a dead link is healthy.
+
+Only two things prove a live link:
+
+```bash
+# 1. the agent logs a session
+journalctl -u dds_agent.service | grep -i "session established"
+
+# 2. data actually arrives from the FC
+ros2 topic echo /fmu/out/vehicle_status --once
+```
+
+If the agent log shows only `running... | fd: 3` and the `echo` times out, the
+serial link is down regardless of what `ros2 topic list` says — go to the
+troubleshooting section below.
