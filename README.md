@@ -248,30 +248,46 @@ git clone https://github.com/CursedRock17/Jacob_Ladder.git
 cd Jacob_Ladder
 git checkout drogue_collector
 git submodule update --init --recursive
-git apply patch.diff        # required -- see below
 ```
 
-**`patch.diff` is not optional.** It patches the `px4-ros2-interface-lib`
-submodule to add `setSkipMessageCompatibilityCheck()` (and its backing flag) to
-`ModeExecutorBase`, which upstream only provides on `ModeBase`. Several of our
-mode executors call it, so without the patch `precision_land`, `drogue_flight`
-and `jacob_manual` fail to compile with:
+That is the whole clone procedure — there is nothing to patch by hand.
+
+#### About the `px4-ros2-interface-lib` submodule
+
+It points at **`cdenihan/px4-ros2-interface-lib`**, a fork of
+`Auterion/px4-ros2-interface-lib`, on branch
+`jacob-ladder/executor-skip-msg-check`. The fork is the upstream `1.6.0` tag plus
+a single commit adding `setSkipMessageCompatibilityCheck()` and its backing flag
+to `ModeExecutorBase`.
+
+Upstream only provides that method on `ModeBase`, where it is `protected` — and
+`ModeExecutorBase`'s `friend` relationship with `ModeBase` is not inherited by
+derived classes, so no executor subclass can reach it. Several of our mode
+executors call it, so without the fork `precision_land`, `drogue_flight` and
+`jacob_manual` fail to compile with:
 
 ```
 error: 'setSkipMessageCompatibilityCheck' was not declared in this scope
 ```
 
-Because it modifies a submodule's working tree, `git submodule update` — and any
-re-clone or submodule reset — reverts it and you must re-apply. Check whether it
-is currently applied with:
+This used to be distributed as a `patch.diff` in the repo root that you applied
+by hand. That is gone: it was undocumented, any `git submodule update` silently
+reverted it, and it left the submodule permanently dirty. The change now lives in
+a real commit, so a plain `git submodule update --init --recursive` gives you a
+tree that builds.
+
+To rebase onto a newer upstream release:
 
 ```bash
-grep -q _skip_message_compatibility_check \
-  src/px4-ros2-interface-lib/px4_ros2_cpp/include/px4_ros2/components/mode_executor.hpp \
-  && echo applied || echo "NOT applied - run: git apply patch.diff"
+cd src/px4-ros2-interface-lib
+git remote add upstream https://github.com/Auterion/px4-ros2-interface-lib.git
+git fetch upstream --tags
+git rebase <new-tag>            # one commit to replay
+git push fork HEAD --force-with-lease
+cd ../.. && git add src/px4-ros2-interface-lib && git commit
 ```
 
-Note that the patch's guard short-circuits `waitForFMU()` as well as
+Note the guard short-circuits `waitForFMU()` as well as
 `messageCompatibilityCheck()`, so an executor that skips the check also does not
 wait for the FMU before registering.
 

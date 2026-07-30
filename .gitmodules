@@ -3,7 +3,8 @@
 	url = https://github.com/ros-perception/vision_opencv.git
 [submodule "src/px4-ros2-interface-lib"]
 	path = src/px4-ros2-interface-lib
-	url = https://github.com/Auterion/px4-ros2-interface-lib.git
+	url = https://github.com/cdenihan/px4-ros2-interface-lib.git
+	branch = jacob-ladder/executor-skip-msg-check
 [submodule "src/px4_msgs"]
 	path = src/px4_msgs
 	url = https://github.com/PX4/px4_msgs.git

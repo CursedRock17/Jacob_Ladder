@@ -56,12 +56,12 @@ cd ~ && git clone https://github.com/CursedRock17/Jacob_Ladder.git -b drogue_col
 
 We'll need to add in our desired packages to get this drone off the ground and into the air. The simulation portion of Jacob's Ladder is all dockerized, maybe that will need to be the case for drones, depending on what the project needs (TODO: Maybe dockerize setup), until then we've provided some shell scripts that will recreate the docker installation.
 1) Enter the Jacob_Ladder repository on the Jetson
-1a) Apply the vendored-library patch — `git apply patch.diff` from the repo root.
-    It adds `setSkipMessageCompatibilityCheck()` to `ModeExecutorBase` in the
-    `px4-ros2-interface-lib` submodule; without it `precision_land`,
-    `drogue_flight` and `jacob_manual` will not compile. Any
-    `git submodule update` reverts it, so re-apply after one. See the
-    [README](../README.md#3-clone-jacobs-ladder) for the check-if-applied one-liner.
+1a) Make sure the submodules are initialised — `git submodule update --init --recursive`.
+    Nothing needs patching by hand: `px4-ros2-interface-lib` points at a fork
+    carrying the `ModeExecutorBase` fix that `precision_land`, `drogue_flight`
+    and `jacob_manual` need to compile. (This used to be a manual
+    `git apply patch.diff`; see the
+    [README](../README.md#about-the-px4-ros2-interface-lib-submodule).)
 2) Navigate to the [Installation Scripts Directory](../installation_scripts) and make sure all of the shell scripts have permissions `chmod +x *.sh`
 3) Assert that you have the correct permissions on the Jetson, otherwise you have to run all commands with `sudo`:
     ```bash
