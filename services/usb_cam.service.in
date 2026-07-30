@@ -10,8 +10,8 @@ WorkingDirectory=@JL_WS_ROOT@
 ExecStart=/bin/bash @JL_WS_ROOT@/services/run_usb_cam.sh
 Restart=on-failure
 RestartSec=5s
-StandardOutput=syslog
-StandardError=syslog
+StandardOutput=journal
+StandardError=journal
 SyslogIdentifier=usb_cam_service
 
 [Install]

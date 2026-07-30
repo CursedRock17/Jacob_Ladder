@@ -14,8 +14,8 @@ Environment="ROS_LOG_DIR=/var/log/ros2"
 # start_aruco_tracker.sh looks for the tracktor-beam workspace next to this one
 # and under $HOME; uncomment and set this if yours lives elsewhere.
 #Environment="JL_TRACKTOR_BEAM_DIR=/path/to/tracktor-beam"
-StandardOutput=syslog
-StandardError=syslog
+StandardOutput=journal
+StandardError=journal
 SyslogIdentifier=aruco_tracker_service
 
 [Install]
