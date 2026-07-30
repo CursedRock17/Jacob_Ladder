@@ -7,5 +7,8 @@ jl_source_ros
 # and fall back to the workspace venv ($JL_VENV) when it isn't there.
 jl_source_venv "$JL_WS_ROOT/src/oak_d_visual_odometry/venv"
 
-# Run the ROS2 usb_cam node with specified parameters
-ros2 run oak_d_visual_odometry vo_publisher_px4_node
+# Run the OAK-D visual-odometry publisher with PX4 VehicleOdometry output.
+# (Node name per `ros2 pkg executables oak_d_visual_odometry`; this file used to
+# name vo_publisher_px4_node, which has never existed and made the unit
+# restart-loop.)
+ros2 run oak_d_visual_odometry cuvslam_publisher_px4_node
