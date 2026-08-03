@@ -1,0 +1,114 @@
+# Battery monitor configuration -- Jacob's Ladder
+#
+#   battery_monitor --show-config     see the resolved pack voltages
+#   battery_monitor --once            one reading with margins to each level
+#   battery_monitor --test-alerts     fire every channel so you know they work
+#
+# After editing:  sudo systemctl restart battery_monitor
+#
+# ---------------------------------------------------------------------------
+# ALL THRESHOLDS BELOW ARE VOLTS *PER CELL*, not pack volts.
+# Pack voltage = per-cell value x battery.cells. With cells: 6, land: 3.50
+# the monitor alerts at 21.00 V. Getting battery.cells wrong scales every trip
+# point, so the monitor cross-checks it against the measured voltage at start
+# and shouts if they disagree.
+# ---------------------------------------------------------------------------
+
+sensor:
+  bus: 7                      # /dev/i2c-7
+  address: 0x45
+  shunt_resistance: 0.001     # ohms -- 1 mOhm shunt
+  shunt_power_rating: 5.0     # watts; sets current resolution (I_max = sqrt(P/R))
+
+battery:
+  # 6S2P pack. Only the SERIES count goes here: the 2P doubles capacity but
+  # not voltage, so the thresholds below are unaffected by it.
+  # Matches PX4 BAT1_N_CELLS -- keep them in sync.
+  cells: 6
+
+  # lipo | li-ion. Drives the state-of-charge curve, the plausible-voltage
+  # band used to sanity-check `cells`, and the discharge floor the thresholds
+  # are validated against. A Li-ion pack scored on the LiPo curve reads 0%
+  # for the whole bottom of its usable range.
+  chemistry: li-ion
+  cell_full: 4.20
+  cell_nominal: 3.60          # Li-ion nominal; LiPo is 3.70
+
+  # Pack internal resistance in ohms, used only when sampling.sag_compensate
+  # is true. Measure it as (V_noload - V_loaded) / I_loaded. A wrong value is
+  # worse than none, which is why compensation ships off.
+  internal_resistance: 0.0
+
+  # Cross-check the configured cell count against the measured voltage at
+  # startup and warn on a mismatch.
+  detect_cells: true
+
+  # Below this the monitor treats the pack as unplugged and stays quiet,
+  # rather than alerting CRITICAL at 0 V forever.
+  present_min_voltage: 5.0
+
+# Trip points, most severe last. Each must be strictly below the one above it.
+# Values below are Li-ion for the 6S2P bench pack; `land` and `min` are the
+# pilot-specified 16.2 V and 15.3 V divided by the 6 series cells.
+thresholds:
+  warn: 3.00                  # 18.00 V pack -- getting low, start wrapping up
+  land: 2.70                  # 16.20 V pack -- bring it down now
+  critical: 2.60              # 15.60 V pack -- land immediately
+  min: 2.55                   # 15.30 V pack -- below this you damage cells
+
+# For reference, the conservative 6S LiPo profile this replaced:
+#   warn: 3.70   land: 3.50   critical: 3.40   min: 3.30
+#   (22.20 / 21.00 / 20.40 / 19.80 V pack, with chemistry: lipo)
+
+sampling:
+  interval: 2.0               # seconds between reads
+
+  # Pack voltage sags hard under throttle. Without filtering, one punch-out
+  # trips LAND and you learn to ignore the alerts.
+  smoothing: 0.25             # EMA weight on each new sample (lower = smoother)
+  confirm_samples: 3          # consecutive samples before a level activates
+  hysteresis: 0.04            # V/cell of margin needed to recover upward
+
+  # Reconstruct open-circuit voltage as V_bus + I x internal_resistance.
+  # Requires a measured battery.internal_resistance.
+  sag_compensate: false
+
+  trend_window: 60.0          # seconds of history for the V/min slope and ETA
+
+alerts:
+  # How often to re-alert while sitting in a level. More severe nags harder.
+  repeat_seconds:
+    warn: 120
+    land: 45
+    critical: 20
+    min: 10
+
+  notify_on_recover: true     # announce climbing back out of a level
+  notify_on_start: true       # announce pack state when the service starts
+
+notifications:
+  # GNOME popup on the Jetson's display. `land` and worse use critical
+  # urgency, which stays on screen until dismissed.
+  desktop:
+    enabled: true
+    user: null                # null = the user the service runs as
+
+  # Broadcast to every terminal and SSH session. This is the one that reaches
+  # you when you are headless in the field.
+  wall:
+    enabled: true
+    min_level: warn
+
+  # There is no audio channel: this Jetson has no usable sound output (the
+  # only playback card is the Tegra HDMI transmitter, and the attached display
+  # carries no audio), and no push channel by choice. Alerts are visual, plus
+  # the journal.
+
+logging:
+  # Set a path to record a flight log you can plot afterwards.
+  csv_path: null              # e.g. /var/log/jacob_ladder/battery.csv
+  csv_interval: 10.0          # seconds between CSV rows
+
+  # Periodic status line to the journal, so a quiet log means "nothing wrong"
+  # rather than "the monitor died an hour ago". 0 disables.
+  heartbeat_seconds: 300.0    # journalctl -u battery_monitor -f

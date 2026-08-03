@@ -56,6 +56,12 @@ START HERE:
 | [translation_node](src/translation_node) | Should NOT be Altered : Use Given Branch -> Introduced in PX4 v1.15.0, translates old px4 messages necessary for past versions to new px4 messages |
 | [vision_opencv](src/vision_opencv) | Should NOT be Altered : Use Given Branch -> OpenCV STD library |
 
+Not a ROS 2 package, but it runs on the vehicle:
+
+| Component | Objective |
+|---|---|
+| [battery_monitor](battery_monitor) | Watches pack voltage on the INA238 and alerts at configurable land / min thresholds. Runs as a systemd service, independent of ROS 2. |
+
 ## What Can It Do?
 
 | Capability | Description |
@@ -66,6 +72,7 @@ START HERE:
 | **Drogue Collection** | Detect a drogue target via YOLO, plan a smooth S-curve trajectory, and fly to it |
 | **GPS-Denied Flight (VIO)** | Estimate position indoors with an OAK-D stereo camera and NVIDIA cuVSLAM, fed to PX4's EKF2 as external vision — see [oak_d_visual_odometry](src/oak_d_visual_odometry) |
 | **Takeoff & Hold** | Simple building-block modes for taking off, holding altitude, and landing |
+| **Battery Voltage Alerting** | Watch the pack on the INA238 and warn — desktop popup, terminal broadcast — at your configured land and minimum voltages, before a pack gets over-drained. See [battery_monitor](battery_monitor) |
 
 ## If You're New to ROS 2
 
