@@ -1,0 +1,27 @@
+[Unit]
+Description=Drone Battery Voltage Monitor (INA238)
+# No network and no ROS dependency on purpose: low voltage still has to be
+# announced when everything else on the vehicle has failed to come up.
+After=local-fs.target
+# Never give up on a battery alarm. The default burst limit would stop the
+# unit for good after 5 restarts in 10s — e.g. while the I2C bus is briefly
+# unavailable at boot — leaving the pack silently unmonitored.
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+User=@JL_USER@
+Group=@JL_GROUP@
+WorkingDirectory=@JL_WS_ROOT@
+ExecStart=/bin/bash @JL_WS_ROOT@/services/run_battery_monitor.sh
+Restart=always
+RestartSec=5s
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=battery_monitor
+
+# Point at a different thresholds file if you keep per-airframe configs.
+#Environment="JL_BATTERY_CONFIG=@JL_WS_ROOT@/config/battery_monitor.yaml"
+
+[Install]
+WantedBy=multi-user.target
