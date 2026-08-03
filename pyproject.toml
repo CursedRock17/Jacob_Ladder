@@ -20,12 +20,27 @@ dependencies = [
     # (aarch64) the pinned CUDA torch/torchvision wheels are used, plus
     # jetson-cudss-bootstrap, which preloads the cuDSS runtime at interpreter
     # startup so `import torch` works with no LD_LIBRARY_PATH and no extra steps.
-    "opencv-python==4.9.0.80",
+    # NOTE: opencv-python is deliberately NOT listed here. The pip wheel has no
+    # CUDA support and, being on sys.path inside the venv, it shadows the
+    # CUDA-enabled OpenCV built by installation_scripts/install_opencv.sh (which
+    # installs its cv2 bindings straight into this venv's site-packages). Adding
+    # it back silently disables GPU acceleration for every cv2 call.
+    # On a non-Jetson machine, install it by hand: `uv pip install opencv-python`.
     "ultralytics",
     "torch @ https://pypi.jetson-ai-lab.io/jp6/cu126/+f/46b/b8b13f844b211/torch-2.11.0-cp310-cp310-linux_aarch64.whl#sha256=46bb8b13f844b2111f6f41abc703d01075a7185e0c587cb002e957ede2b8c8a3 ; sys_platform == 'linux' and platform_machine == 'aarch64'",
     "torchvision @ https://pypi.jetson-ai-lab.io/jp6/cu126/+f/d11/6f08d3d62417d/torchvision-0.26.0-cp310-cp310-linux_aarch64.whl#sha256=d116f08d3d62417dc36cbf41923e491b8b49b77399575f0878ae391e6e77a159 ; sys_platform == 'linux' and platform_machine == 'aarch64'",
     "jetson-cudss-bootstrap ; sys_platform == 'linux' and platform_machine == 'aarch64'",
 ]
+
+# ultralytics depends on opencv-python unconditionally. That wheel is a CPU-only
+# OpenCV, and because it lives in this venv's site-packages it wins `import cv2`
+# over the CUDA-enabled OpenCV that installation_scripts/install_opencv.sh
+# installs into the same directory -- so a plain `uv sync` would silently undo
+# GPU acceleration. The never-true marker drops the requirement everywhere
+# without having to restate the rest of ultralytics' dependency list.
+# If you are NOT using the CUDA build, run `uv pip install opencv-python`.
+[tool.uv]
+override-dependencies = ["opencv-python ; sys_platform == 'never'"]
 
 [tool.uv.workspace]
 members = ["packages/jetson_cudss_bootstrap"]
