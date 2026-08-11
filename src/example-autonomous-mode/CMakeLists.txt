@@ -41,12 +41,12 @@ if(BUILD_TESTING)
 endif()
 
 # Install launch and config folders
-install(DIRECTORY launch
-  DESTINATION share/${PROJECT_NAME}/
-)
+# install(DIRECTORY launch
+#  DESTINATION share/${PROJECT_NAME}/
+# )
 
-install(DIRECTORY cfg
-  DESTINATION share/${PROJECT_NAME}/
-)
+# install(DIRECTORY cfg
+#  DESTINATION share/${PROJECT_NAME}/
+# )
 
 ament_package()
