@@ -27,6 +27,8 @@ add_executable(example-autonomous-mode
   ExampleAutonomousMode.cpp
 )
 
+ament_target_dependencies(example-autonomous-mode rclcpp Eigen3 px4_ros2_cpp geometry_msgs std_msgs tf2_ros tf2)
+
 # Install executables
 install(TARGETS
   example-autonomous-mode
