@@ -1,6 +1,7 @@
 [submodule "src/vision_opencv"]
 	path = src/vision_opencv
-	url = https://github.com/ros-perception/vision_opencv.git
+	url = https://github.com/cdenihan/vision_opencv.git
+	branch = jacob-ladder/silence-setup-warnings
 [submodule "src/px4-ros2-interface-lib"]
 	path = src/px4-ros2-interface-lib
 	url = https://github.com/cdenihan/px4-ros2-interface-lib.git
