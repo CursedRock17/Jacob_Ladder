@@ -1,0 +1,21 @@
+# Parameters for the example autonomous mode.
+#
+# The top-level key must match the node name set in the launch file, otherwise
+# ROS 2 silently ignores the file and the mode runs on the defaults compiled
+# into ExampleAutonomousMode.hpp.
+example_autonomous_mode:
+  ros__parameters:
+    # Height of the first low hover, which gives the optical flow sensor a
+    # close, textured surface to lock onto before the drone climbs away
+    optical_flow_height: 0.25
+    # How long to sit at that height before continuing
+    optical_flow_hold_time: 3.0
+    # "Close enough" tolerance when deciding a target height was reached
+    delta_position: 0.05
+    # How long to hover before descending
+    hold_duration: 7.5
+    # Downward speed during the landing descent
+    descent_vel: 0.5
+    # Height above the takeoff point below which we count as landed, used as a
+    # backstop in case PX4's landing detector never fires
+    landing_height: 0.10

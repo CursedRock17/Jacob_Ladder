@@ -18,6 +18,10 @@ OPENCV_DIR ?= /usr/local/lib/cmake/opencv4
 # build down with it -- so formatting is skipped unless the file is present.
 # Quote the patterns: unquoted, the shell expands them before astyle sees the
 # `*.cpp,*.hpp` comma syntax and nothing matches.
+#
+# src/example_autonomous_mode is deliberately absent from this list: it carries
+# its own .clang-format and is formatted with clang-format instead, so astyle
+# must not touch it.
 ASTYLE_OPTIONS ?= astylerc
 ASTYLE_TARGETS := "src/aruco_tracker/*.cpp,*.hpp" "src/precision_land/*.cpp,*.hpp"
 

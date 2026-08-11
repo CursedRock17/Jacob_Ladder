@@ -1,9 +1,9 @@
 <?xml version="1.0"?>
 <?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
 <package format="3">
-  <name>example-autonomous-mode</name>
+  <name>example_autonomous_mode</name>
   <version>0.0.1</version>
-  <description>Example Autonomous Mode</description>
+  <description>Worked example of a PX4 external flight mode: take off to a low hover, hold, and land. Copy this package as the starting point for a new autonomous mode.</description>
   <maintainer email="cdenihan@proton.me">Connor Denihan</maintainer>
   <license>MIT</license>
 
@@ -20,7 +20,9 @@
   <depend>px4_msgs</depend>
   <depend>std_msgs</depend>
   <depend>geometry_msgs</depend>
-  <depend>tf2_ros</depend>
+
+  <exec_depend>launch</exec_depend>
+  <exec_depend>launch_ros</exec_depend>
 
   <test_depend>ament_lint_auto</test_depend>
   <test_depend>ament_lint_common</test_depend>
