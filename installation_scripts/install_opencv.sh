@@ -201,6 +201,21 @@ if [ "${install_prefix}" != "/usr" ] && [ "${install_prefix}" != "/usr/local" ];
 fi
 sudo ldconfig
 
+# `make install` writes this build's cv2/ straight over the opencv-python wheel's
+# cv2/, but leaves the wheel's opencv_python-*.dist-info behind. That orphan
+# metadata makes every later `uv sync` believe the wheel is still installed and
+# try to uninstall it, which fails ("missing RECORD file") and prints a warning
+# about an incomplete environment on every run. The wheel's files are already
+# gone, so drop the metadata to match.
+if [ "${build_python}" = "ON" ] && [ -n "${venv_site_packages:-}" ]; then
+    for stale_dist_info in "${venv_site_packages}"/opencv_python-*.dist-info; do
+        if [ -d "${stale_dist_info}" ]; then
+            echo "** Removing orphaned opencv-python metadata: ${stale_dist_info}"
+            rm -rf "${stale_dist_info}"
+        fi
+    done
+fi
+
 
 echo "------------------------------------"
 echo "** Verify"
