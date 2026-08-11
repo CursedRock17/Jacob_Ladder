@@ -26,7 +26,7 @@
 
 // #include <string>
 
-namespace precision_land {
+namespace ExampleAutonomousMode {
 
 inline constexpr char kTakeoffLandModeName[] = "TakeoffLand";
 inline constexpr bool kTakeoffLandDebugOutput = true;
@@ -103,4 +103,4 @@ private:
   float _descent_vel = 0.5f;     // Vertical speed during descent (m/s)
 };
 
-} // namespace precision_land
+} // namespace ExampleAutonomousMode

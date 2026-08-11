@@ -15,7 +15,7 @@
 
 #include <px4_ros2/components/node_with_mode.hpp>
 
-namespace precision_land {
+namespace ExampleAutonomousMode {
 
 TakeoffLandMode::TakeoffLandMode(rclcpp::Node &node)
     : ModeBase(node, ModeBase::Settings{kTakeoffLandModeName}), _node(node) {
@@ -240,15 +240,15 @@ std::string TakeoffLandMode::stateName(State state) const {
   }
 }
 
-} // namespace precision_land
+} // namespace ExampleAutonomousMode
 
 // Entry point — NodeWithMode registers our mode with PX4 and spins the ROS node
 int main(int argc, char *argv[]) {
   rclcpp::init(argc, argv);
-  rclcpp::spin(
-      std::make_shared<px4_ros2::NodeWithMode<precision_land::TakeoffLandMode>>(
-          precision_land::kTakeoffLandModeName,
-          precision_land::kTakeoffLandDebugOutput));
+  rclcpp::spin(std::make_shared<
+               px4_ros2::NodeWithMode<ExampleAutonomousMode::TakeoffLandMode>>(
+      ExampleAutonomousMode::kTakeoffLandModeName,
+      ExampleAutonomousMode::kTakeoffLandDebugOutput));
   rclcpp::shutdown();
   return 0;
 }
