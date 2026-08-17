@@ -151,6 +151,7 @@ START HERE:
 | [Micro-XRCE-DDS-Agent](src/Micro-XRCE-DDS-Agent) | Should NOT be Altered : Use given branch -> Communication Agent from Drone to Host Computer |
 | [aruco_tracker](src/aruco_tracker) | ROS 2 Wrapper for OpenCV detection of an ArUco Marker |
 | [drogue_flight](src/drogue_flight) | TODO: In-Progress Porting for flying to a detected KC-130 drogue |
+| [example_autonomous_mode](src/example_autonomous_mode) | **Start here to write a new mode** -> A minimal, working External Mode (take off, hold, land) documented line by line and meant to be copied |
 | [jacob_manual](src/jacob_manual)  | ROS 2 External Modes that Require Manual Control to get in the air, but fly autonomous missions after |
 | [precision_land](src/precision_land)  | ROS 2 External Modes that fly autonomous missions for object detection, trajectory planning, and landing
 | [oak_d_visual_odometry](src/oak_d_visual_odometry)  | ROS 2 nodes for OAK-D visual odometry using NVIDIA cuVSLAM, with optional PX4 `VehicleOdometry` output for flight. |
@@ -390,10 +391,19 @@ Select the precision landing mode from the QGroundControl dropdown:
 | `jacob_manual.sh` | `jacob_manual/front_approach.launch.py` | `gz_x500_dual_cam_aruco_dual_ids` | Same as `approach_aruco.sh`, but runs the newer `jacob_manual` package version |
 | `takeoff_hover.sh` | `precision_land/takeoff_hold.launch.py` | `gz_x500_dual_cam` | Takeoff and hold indefinitely — good for hover tuning |
 | `takeoff_hover_land.sh` | `precision_land/takeoff_land.launch.py` | `gz_x500_dual_cam` | Takeoff, hold briefly, then land — simplest end-to-end mode |
-| `offboard_blank.sh` | `precision_land/blank_mode.launch.py` | `gz_x500_dual_cam` | Empty external-mode template — use as a starting point when writing a new mode |
+| `offboard_blank.sh` | `precision_land/blank_mode.launch.py` | `gz_x500_dual_cam` | Empty external-mode template — registers with PX4 and does nothing, for when you already know the framework |
 | `moving_launch.sh` | `precision_land/track_follow.launch.py` | Custom moving platform world | Track and land on a moving ArUco platform (uses the `v1_16_tracker` aruco launch) |
 | `real_launch.sh` | *(edit before use)* | Real hardware | DDS agent + RViz shell for Jetson/Pixhawk flight testing — all mode commands are commented out so you can uncomment the one you want |
 | `fake_drogue.sh` | *(no flight mode)* | Real hardware | Drogue camera feed sanity check — runs the DDS agent and `ros2 topic hz` on the camera topic |
+
+Writing a new mode rather than running an existing one? Start from
+[example_autonomous_mode](src/example_autonomous_mode) — a minimal mode that
+actually flies (take off, hold, land), documented line by line, with its own
+launch file:
+
+```bash
+ros2 launch example_autonomous_mode example_autonomous_mode.launch.py
+```
 
 Every script follows the same shape: the first tab is PX4 SITL (or omitted for real hardware), then the DDS agent, the translation node, any trackers, and the mode itself. If a script doesn't match your container name or PX4 version, open it and edit the `container_name` variable at the top — it's the same in every script.
 
