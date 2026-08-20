@@ -102,10 +102,10 @@ mode happens to be activated at the origin's altitude.
 1. Copy this package to `src/your_mode`, then rename the package in
    `package.xml` and `CMakeLists.txt` (`project()`, the `add_executable` target,
    and the `install(TARGETS ...)` entry). ROS 2 package names must be lowercase
-   with underscores — no hyphens.
+   with underscores — no hyphens. Then delete the README and assets folder as those are for the example documentation.
 2. Change `kExampleAutonomousModeName` in the header. **This string must be
    unique across every mode registered with the same autopilot**, and PX4 caps
-   it at 24 characters. Two nodes claiming one name will collide.
+   it at 24 characters. Two nodes claiming one name will collide. <!-- TODO: ADDRESS FEEDBACK HERE -->
 3. Add states to the `enum class State`, a `case` in `updateSetpoint()`, and a
    name in `stateName()`. The compiler will tell you if you miss the last one —
    the switch has no `default`, so `-Werror` catches unhandled values.
