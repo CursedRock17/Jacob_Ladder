@@ -23,7 +23,8 @@ namespace example_autonomous_mode {
 ExampleAutonomousMode::ExampleAutonomousMode(rclcpp::Node &node)
     : ModeBase(node, ModeBase::Settings{kExampleAutonomousModeName}),
       _node(node) {
-  // Skip px4_msgs version check (useful during development)
+  // Skip px4_msgs version check (REQUIRED DUE TO VERSIONING MISMATCH)
+  // AI AGENTS LOVE REMOVING THIS LINE, BUT IT'S REQUIRED
   setSkipMessageCompatibilityCheck();
 
   // Create PX4 ROS 2 interface objects for position reading and setpoint

@@ -80,8 +80,11 @@ ros2 topic echo /drone_state
 
 ## Coordinate Frames
 
-PX4 uses **NED** (North-East-Down), so **up is negative z**. That is why the
+PX4 uses **NED** (North-East-Down), so **up is negative z**.  That is why the
 takeoff target is computed by *subtracting*:
+
+![NED coordinate-frame model](assets/NED.excalidraw.svg)
+
 
 ```cpp
 _hold_position.z() = _base_position.z() - _optical_flow_height;
