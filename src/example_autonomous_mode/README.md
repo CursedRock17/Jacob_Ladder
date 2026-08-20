@@ -115,9 +115,11 @@ mode happens to be activated at the origin's altitude.
    `Descending`. Leave the takeoff and landing states alone until you have a
    reason not to.
 
-`updateSetpoint()` runs at roughly 50 Hz and is passed `dt_s`, the time since
-the last call. Use it to integrate — `_hold_position.z() -= climb_rate * dt_s`
-is a rate-limited climb — rather than assuming a fixed loop period.
+`updateSetpoint()` is rate-limited to update at a maximum rate of 50 Hz for
+this mode. The `dt_s` argument is the measured time since the previous
+callback, so it may vary from 0.02 seconds. Use it to integrate —
+`_hold_position.z() -= climb_rate * dt_s` is a rate-limited climb — rather than
+assuming a fixed loop period.
 
 ## Formatting
 
