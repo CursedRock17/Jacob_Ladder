@@ -120,12 +120,3 @@ this mode. The `dt_s` argument is the measured time since the previous
 callback, so it may vary from 0.02 seconds. Use it to integrate —
 `_hold_position.z() -= climb_rate * dt_s` is a rate-limited climb — rather than
 assuming a fixed loop period.
-
-## Formatting
-
-This package uses `clang-format` (see `.clang-format`), not the astyle
-configuration the older packages use:
-
-```bash
-clang-format -i src/example_autonomous_mode/*.cpp src/example_autonomous_mode/*.hpp
-```
