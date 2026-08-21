@@ -162,6 +162,7 @@ void ExampleAutonomousMode::updateSetpoint(float dt_s) {
   // --- Landed — hold current position and tell PX4 we're done ---
   case State::Finished: {
     commandPosition(_vehicle_local_position->positionNed());
+    switchToState(State::Idle);
     break;
   }
   }

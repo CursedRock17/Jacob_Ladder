@@ -5,7 +5,7 @@ read start to finish and then copied. It takes off to a low hover, holds, and
 lands — nothing else. Every other mode in this workspace is this shape with more
 states in the middle.
 
-If you want an *empty* skeleton rather than a working mode, see
+If you want an _empty_ skeleton rather than a working mode, see
 `precision_land/BlankMode.cpp` (launched by `launch_scripts/offboard_blank.sh`).
 That one registers with PX4 and does nothing, which is useful when you already
 know the framework. Start here instead if you want to see a mode that actually
@@ -25,13 +25,13 @@ stops talking, PX4 failsafes on its own.
 InitialTakeoffAltitude --> Holding --> Descending --> Finished
 ```
 
-| State | What it does |
-|-------|-------------|
-| **Idle** | Not active. Entered on `onDeactivate()`. |
+| State                      | What it does                                                                                                                                                                    |
+| -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Idle**                   | Not active. Entered on `onDeactivate()`.                                                                                                                                        |
 | **InitialTakeoffAltitude** | Rise to `optical_flow_height` and hover there for `optical_flow_hold_time` seconds, giving the optical flow sensor a close, textured surface to lock onto before climbing away. |
-| **Holding** | Hover at the current position for `hold_duration` seconds. **This is where your own states go.** |
-| **Descending** | Command a constant downward velocity (`descent_vel`) until PX4's landing detector fires, or until the drone is within `landing_height` of where it took off. |
-| **Finished** | Hold position and report success to PX4 (once, on entry). |
+| **Holding**                | Hover at the current position for `hold_duration` seconds. **This is where your own states go.**                                                                                |
+| **Descending**             | Command a constant downward velocity (`descent_vel`) until PX4's landing detector fires, or until the drone is within `landing_height` of where it took off.                    |
+| **Finished**               | Hold position and report success to PX4 (once, on entry).                                                                                                                       |
 
 ## Build and Run
 
@@ -51,14 +51,14 @@ on its own — take off manually or switch into it from a hover.
 
 Configured in `cfg/example_autonomous_mode_params.yaml`:
 
-| Parameter | Default | Unit | Description |
-|-----------|---------|------|-------------|
-| `optical_flow_height` | 0.25 | m | Height of the initial low hover |
-| `optical_flow_hold_time` | 3.0 | s | How long to hold at that height |
-| `delta_position` | 0.05 | m | "Close enough" tolerance for reaching a target |
-| `hold_duration` | 7.5 | s | How long to hover before descending |
-| `descent_vel` | 0.5 | m/s | Downward speed during landing |
-| `landing_height` | 0.10 | m | Height above takeoff counted as landed, as a backstop if the landing detector never fires |
+| Parameter                | Default | Unit | Description                                                                               |
+| ------------------------ | ------- | ---- | ----------------------------------------------------------------------------------------- |
+| `optical_flow_height`    | 0.25    | m    | Height of the initial low hover                                                           |
+| `optical_flow_hold_time` | 3.0     | s    | How long to hold at that height                                                           |
+| `delta_position`         | 0.05    | m    | "Close enough" tolerance for reaching a target                                            |
+| `hold_duration`          | 7.5     | s    | How long to hover before descending                                                       |
+| `descent_vel`            | 0.5     | m/s  | Downward speed during landing                                                             |
+| `landing_height`         | 0.10    | m    | Height above takeoff counted as landed, as a backstop if the landing detector never fires |
 
 Override one at launch:
 
@@ -69,9 +69,9 @@ ros2 launch example_autonomous_mode example_autonomous_mode.launch.py
 
 ## Debug Topics
 
-| Topic | Type | Description |
-|-------|------|-------------|
-| `/drone_state` | `std_msgs/String` | The state name, published on every transition |
+| Topic             | Type                           | Description                                                                                                       |
+| ----------------- | ------------------------------ | ----------------------------------------------------------------------------------------------------------------- |
+| `/drone_state`    | `std_msgs/String`              | The state name, published on every transition                                                                     |
 | `/tracking_error` | `geometry_msgs/Vector3Stamped` | Commanded minus actual position, in NED. If this grows instead of shrinking, PX4 is not following your setpoints. |
 
 ```bash
@@ -80,11 +80,10 @@ ros2 topic echo /drone_state
 
 ## Coordinate Frames
 
-PX4 uses **NED** (North-East-Down), so **up is negative z**.  That is why the
-takeoff target is computed by *subtracting*:
+PX4 uses **NED** (North-East-Down), so **up is negative z**. That is why the
+takeoff target is computed by _subtracting_:
 
 ![NED coordinate-frame model](assets/NED.excalidraw.svg)
-
 
 ```cpp
 _hold_position.z() = _base_position.z() - _optical_flow_height;
@@ -103,9 +102,7 @@ mode happens to be activated at the origin's altitude.
    `package.xml` and `CMakeLists.txt` (`project()`, the `add_executable` target,
    and the `install(TARGETS ...)` entry). ROS 2 package names must be lowercase
    with underscores — no hyphens. Then delete the README and assets folder as those are for the example documentation.
-2. Change `kExampleAutonomousModeName` in the header. **This string must be
-   unique across every mode registered with the same autopilot**, and PX4 caps
-   it at 24 characters. Two nodes claiming one name will collide. <!-- TODO: ADDRESS FEEDBACK HERE -->
+2. Change `kExampleAutonomousModeName` in the header. **This string must be unique across every mode registered with the same autopilot**, and PX4 caps it at 24 characters. Two nodes claiming one name will collide. For more details on the naming serialization, see the [PX4 documentation](https://docs.px4.io/main/en/ros2/px4_ros2_control_interface#replacing-an-internal-mode).
 3. Add states to the `enum class State`, a `case` in `updateSetpoint()`, and a
    name in `stateName()`. The compiler will tell you if you miss the last one —
    the switch has no `default`, so `-Werror` catches unhandled values.
