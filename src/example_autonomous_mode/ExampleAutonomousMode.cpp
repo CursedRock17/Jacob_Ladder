@@ -185,8 +185,13 @@ void ExampleAutonomousMode::switchToState(State state) {
 }
 
 void ExampleAutonomousMode::commandPosition(const Eigen::Vector3f &pos) {
+  // Send the requested NED position to PX4. Calling this every update keeps
+  // the position setpoint active while the mode is holding its current state.
   _trajectory_setpoint->updatePosition(pos);
 
+  // Measure the controller's instantaneous tracking error in the same local
+  // NED frame as the setpoint: positive values mean the vehicle has not yet
+  // reached the commanded coordinate along that axis.
   const auto actual = _vehicle_local_position->positionNed();
   geometry_msgs::msg::Vector3Stamped err;
   err.header.stamp = _node.now();
@@ -194,6 +199,9 @@ void ExampleAutonomousMode::commandPosition(const Eigen::Vector3f &pos) {
   err.vector.x = pos.x() - actual.x();
   err.vector.y = pos.y() - actual.y();
   err.vector.z = pos.z() - actual.z();
+
+  // Publish the error for live inspection and post-flight analysis. This is
+  // diagnostic telemetry only; PX4 receives the position setpoint above.
   _tracking_error_publisher->publish(err);
 }
 
@@ -245,10 +253,9 @@ ExampleAutonomousModeExecutor::ExampleAutonomousModeExecutor(
                 msg->z <= _takeoff_target_z) {
               _takeoff_complete = true;
               _in_takeoff = false;
-              RCLCPP_INFO(
-                  _node.get_logger(),
-                  "Takeoff altitude reached (z=%.2f) — scheduling mode",
-                  msg->z);
+              RCLCPP_INFO(_node.get_logger(),
+                          "Takeoff altitude reached (z=%.2f) — scheduling mode",
+                          msg->z);
               runState(State::RunningMode, px4_ros2::Result::Success);
             }
           });
@@ -321,9 +328,7 @@ void ExampleAutonomousModeExecutor::runState(State state,
   case State::Landing:
     RCLCPP_INFO(_node.get_logger(),
                 "Controlled descent complete — PX4 native landing");
-    land([this](px4_ros2::Result r) {
-      runState(State::WaitingForDisarm, r);
-    });
+    land([this](px4_ros2::Result r) { runState(State::WaitingForDisarm, r); });
     break;
 
   case State::WaitingForDisarm:
