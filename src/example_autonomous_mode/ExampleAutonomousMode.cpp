@@ -44,11 +44,6 @@ namespace example_autonomous_mode
             std::bind(&ExampleAutonomousMode::vehicleLandDetectedCallback, this,
                       std::placeholders::_1));
 
-    // Publish current state on /drone_state for debugging — reliable so each
-    // transition is seen by `ros2 topic echo` even under message load
-    _drone_state_publisher = _node.create_publisher<std_msgs::msg::String>(
-        "/drone_state", rclcpp::QoS(10));
-
     loadParameters();
   }
 
@@ -183,7 +178,6 @@ namespace example_autonomous_mode
 
     std_msgs::msg::String state_msg;
     state_msg.data = stateName(state);
-    _drone_state_publisher->publish(state_msg);
 
     _state = state;
     // Every state measures its own dwell time from the moment it is entered, so

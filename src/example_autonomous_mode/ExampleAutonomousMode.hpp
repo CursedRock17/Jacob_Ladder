@@ -81,9 +81,6 @@ namespace example_autonomous_mode
     rclcpp::Subscription<px4_msgs::msg::VehicleLandDetected>::SharedPtr
         _vehicle_land_detected_sub;
 
-    // Publishes the current state name on /drone_state for debugging
-    rclcpp::Publisher<std_msgs::msg::String>::SharedPtr _drone_state_publisher;
-
     // PX4 ROS 2 interface objects for reading position and sending commands
     std::shared_ptr<px4_ros2::OdometryLocalPosition> _vehicle_local_position;
     std::shared_ptr<px4_ros2::TrajectorySetpointType> _trajectory_setpoint;
