@@ -29,13 +29,22 @@ jobs:
         run: test "$(uname -m)" = "aarch64"
 
       # Use only this repository's installation scripts for the system, ROS 2,
-      # OpenCV, and drone dependencies. The hosted ARM runner is not a Jetson
-      # and has no CUDA device, so the same OpenCV script is run CPU-only.
+      # OpenCV, and drone dependencies. CUDA is the one additional system
+      # dependency and is installed directly from NVIDIA's Ubuntu ARM64 repo.
       - name: Install base tools with the repository script
         run: sudo bash installation_scripts/base_tools.sh
 
       - name: Install ROS 2 Humble with the repository script
         run: sudo bash installation_scripts/ros2_humble.sh
+
+      - name: Install NVIDIA CUDA Toolkit 13.3
+        run: |
+          wget -O "${RUNNER_TEMP}/cuda-keyring.deb" \
+            https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2204/sbsa/cuda-keyring_1.1-1_all.deb
+          sudo dpkg -i "${RUNNER_TEMP}/cuda-keyring.deb"
+          sudo apt-get update
+          sudo apt-get -y install cuda-toolkit-13-3
+          /usr/local/cuda/bin/nvcc --version
 
       - name: Install OpenCV with the repository script
         env:
@@ -43,7 +52,7 @@ jobs:
           OPENCV_BUILD_JOBS: "2"
           OPENCV_BUILD_PYTHON: "OFF"
           OPENCV_SRC_DIR: ${{ runner.temp }}/opencv_src
-          OPENCV_WITH_CUDA: "OFF"
+          OPENCV_WITH_CUDA: "ON"
           OPENCV_WITH_CUDNN: "OFF"
         run: bash installation_scripts/install_opencv.sh
 
