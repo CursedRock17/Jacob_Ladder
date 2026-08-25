@@ -2,6 +2,8 @@ name: ROS 2 ARM build
 
 on:
   push:
+    branches:
+      - main
   pull_request:
   workflow_dispatch:
 
