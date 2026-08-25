@@ -38,6 +38,10 @@ if [ "${default_build_jobs}" -lt 1 ]; then
     default_build_jobs=1
 fi
 build_jobs="${OPENCV_BUILD_JOBS:-${default_build_jobs}}"
+# CMake's documented message threshold. STATUS preserves the interactive
+# default; CI can use WARNING to hide feature-probe chatter without hiding
+# warnings or errors.
+cmake_log_level="${OPENCV_CMAKE_LOG_LEVEL:-STATUS}"
 # Default to "no": the ROS Humble debs (cv_bridge, image_geometry, image_pipeline)
 # link libopencv_*.so.4.5d from the Ubuntu packages, so `apt purge *libopencv*`
 # takes a chunk of the ROS install with it.
@@ -131,6 +135,7 @@ cd release/
 cmake_args=(
     -D CMAKE_BUILD_TYPE=RELEASE
     -D CMAKE_INSTALL_PREFIX="${install_prefix}"
+    -D CMAKE_MESSAGE_LOG_LEVEL="${cmake_log_level}"
     -D WITH_CUDA="${with_cuda}"
     -D WITH_CUDNN="${with_cudnn}"
     -D OPENCV_DNN_CUDA="${with_cudnn}"

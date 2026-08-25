@@ -95,6 +95,7 @@ Useful environment variables:
 | `OPENCV_CUDA_ARCH` | `8.7` | Orin NX / Orin Nano / AGX Orin are all `sm_87`. Use `7.2` for Xavier. Listing only your arch roughly halves build time. |
 | `OPENCV_WITH_CUDNN` | `ON` | Set `OFF` if cmake fails to detect cuDNN. JetPack 6.2 ships cuDNN 9, which older OpenCV releases mis-detect. Nothing here needs it — YOLO runs inference through torch, not `cv2.dnn`. |
 | `OPENCV_BUILD_JOBS` | `nproc - 1` | Lower it if the build gets OOM-killed. |
+| `OPENCV_CMAKE_LOG_LEVEL` | `STATUS` | CMake message threshold. CI can use `WARNING` to hide feature-probe status output while retaining warnings and errors. |
 | `OPENCV_PYTHON_VENV` | repo `.venv` | Where the `cv2` bindings are installed. |
 | `OPENCV_INSTALL_PREFIX` | `/usr/local` | |
 

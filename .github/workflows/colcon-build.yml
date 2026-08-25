@@ -1,0 +1,143 @@
+name: ROS 2 ARM build
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: colcon-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  colcon-build:
+    name: Colcon build (Ubuntu 22.04 ARM64)
+    runs-on: ubuntu-22.04-arm
+    timeout-minutes: 240
+    env:
+      CMAKE_C_COMPILER_LAUNCHER: ccache
+      CMAKE_CUDA_COMPILER_LAUNCHER: ccache
+      CMAKE_CXX_COMPILER_LAUNCHER: ccache
+      OPENCV_CACHE_PREFIX: ${{ github.workspace }}/.cache/opencv-4.10.0-cuda-12.6
+
+    steps:
+      - name: Check out the workspace and its submodules
+        uses: actions/checkout@v7
+        with:
+          submodules: recursive
+          persist-credentials: false
+
+      - name: Verify the runner architecture
+        run: test "$(uname -m)" = "aarch64"
+
+      # Use only this repository's installation scripts for the system, ROS 2,
+      # OpenCV, and drone dependencies. CUDA is the one additional system
+      # dependency and is installed directly from NVIDIA's Ubuntu ARM64 repo.
+      - name: Install base tools with the repository script
+        run: sudo bash installation_scripts/base_tools.sh
+
+      # ROS 2 Humble targets Ubuntu 22.04. Prefer Jammy's CMake over the newer
+      # runner-image copy, whose removed compatibility modules produce policy
+      # warnings in otherwise valid Humble packages.
+      - name: Use Ubuntu 22.04 system CMake
+        run: |
+          /usr/bin/cmake --version
+          echo "/usr/bin" >> "$GITHUB_PATH"
+
+      - name: Restore the compiler cache
+        uses: actions/cache@v6
+        with:
+          path: ~/.cache/ccache
+          key: ccache-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('src/**/CMakeLists.txt', 'src/**/*.cpp', 'src/**/*.cc', 'src/**/*.c', 'src/**/*.hpp', 'src/**/*.h', 'src/**/*.cu', 'src/**/*.idl', 'src/**/*.msg', 'src/**/*.srv', 'src/**/package.xml') }}
+          restore-keys: |
+            ccache-${{ runner.os }}-${{ runner.arch }}-
+
+      - name: Configure the compiler cache
+        run: |
+          ccache --max-size=2G
+          ccache --zero-stats
+
+      - name: Install ROS 2 Humble with the repository script
+        run: sudo bash installation_scripts/ros2_humble.sh
+
+      - name: Install NVIDIA CUDA Toolkit 12.6
+        run: |
+          wget -O "${RUNNER_TEMP}/cuda-keyring.deb" \
+            https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2204/sbsa/cuda-keyring_1.1-1_all.deb
+          sudo dpkg -i "${RUNNER_TEMP}/cuda-keyring.deb"
+          sudo apt-get update
+          sudo apt-get -y install libunwind-dev
+          sudo apt-get -y install cuda-toolkit-12-6
+          /usr/local/cuda/bin/nvcc --version
+
+      - name: Restore the OpenCV install cache
+        id: opencv-cache
+        uses: actions/cache/restore@v6
+        with:
+          path: ${{ env.OPENCV_CACHE_PREFIX }}
+          key: opencv-${{ runner.os }}-${{ runner.arch }}-cmake3.22-cuda12.6-sm87-opencv4.10.0-${{ hashFiles('installation_scripts/install_opencv.sh') }}
+
+      - name: Install OpenCV with the repository script
+        if: steps.opencv-cache.outputs.cache-hit != 'true'
+        env:
+          REMOVE_DEFAULT_OPENCV: "no"
+          OPENCV_BUILD_JOBS: "3"
+          OPENCV_BUILD_PYTHON: "OFF"
+          OPENCV_CMAKE_LOG_LEVEL: "WARNING"
+          OPENCV_CUDA_ARCH: "8.7"
+          OPENCV_INSTALL_PREFIX: ${{ env.OPENCV_CACHE_PREFIX }}
+          OPENCV_SRC_DIR: ${{ runner.temp }}/opencv_src
+          OPENCV_VERSION: "4.10.0"
+          OPENCV_WITH_CUDA: "ON"
+          OPENCV_WITH_CUDNN: "OFF"
+        run: |
+          cmake --version
+          bash installation_scripts/install_opencv.sh
+
+      - name: Configure the OpenCV install
+        run: |
+          test -f "${OPENCV_CACHE_PREFIX}/lib/cmake/opencv4/OpenCVConfig.cmake"
+          echo "${OPENCV_CACHE_PREFIX}/lib" | sudo tee /etc/ld.so.conf.d/opencv-cuda.conf > /dev/null
+          sudo ldconfig
+          PKG_CONFIG_PATH="${OPENCV_CACHE_PREFIX}/lib/pkgconfig" pkg-config --modversion opencv4
+          "${OPENCV_CACHE_PREFIX}/bin/opencv_version" --verbose | grep -A2 "NVIDIA CUDA"
+
+      - name: Save the OpenCV install cache
+        if: steps.opencv-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v6
+        with:
+          path: ${{ env.OPENCV_CACHE_PREFIX }}
+          key: opencv-${{ runner.os }}-${{ runner.arch }}-cmake3.22-cuda12.6-sm87-opencv4.10.0-${{ hashFiles('installation_scripts/install_opencv.sh') }}
+
+      - name: Install drone packages with the repository script
+        run: sudo bash installation_scripts/drone_packages.sh
+
+      # uv is the sole tool installed by a setup action, and it is installed
+      # only after the repository's system installation scripts have run.
+      - name: Install uv
+        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+
+      - name: Configure the Python workspace from the README
+        run: |
+          uv venv --python 3.10 --system-site-packages .venv
+          uv sync
+          source .venv/bin/activate
+          source /opt/ros/humble/setup.bash
+
+      - name: Build the ROS 2 workspace with colcon
+        run: |
+          source .venv/bin/activate
+          source /opt/ros/humble/setup.bash
+          colcon build --cmake-args \
+            " --no-warn-unused-cli" \
+            -DCMAKE_MESSAGE_LOG_LEVEL=WARNING \
+            -DOpenCV_DIR="${OPENCV_CACHE_PREFIX}/lib/cmake/opencv4"
+          source install/setup.bash
+
+      - name: Show compiler cache statistics
+        run: ccache --show-stats
