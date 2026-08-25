@@ -1,0 +1,70 @@
+name: ROS 2 ARM build
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: colcon-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  colcon-build:
+    name: Colcon build (Ubuntu 22.04 ARM64)
+    runs-on: ubuntu-22.04-arm
+    timeout-minutes: 240
+
+    steps:
+      - name: Check out the workspace and its submodules
+        uses: actions/checkout@v7
+        with:
+          submodules: recursive
+          persist-credentials: false
+
+      - name: Verify the runner architecture
+        run: test "$(uname -m)" = "aarch64"
+
+      # Use only this repository's installation scripts for the system, ROS 2,
+      # OpenCV, and drone dependencies. The hosted ARM runner is not a Jetson
+      # and has no CUDA device, so the same OpenCV script is run CPU-only.
+      - name: Install base tools with the repository script
+        run: sudo bash installation_scripts/base_tools.sh
+
+      - name: Install ROS 2 Humble with the repository script
+        run: sudo bash installation_scripts/ros2_humble.sh
+
+      - name: Install OpenCV with the repository script
+        env:
+          REMOVE_DEFAULT_OPENCV: "no"
+          OPENCV_BUILD_JOBS: "2"
+          OPENCV_BUILD_PYTHON: "OFF"
+          OPENCV_SRC_DIR: ${{ runner.temp }}/opencv_src
+          OPENCV_WITH_CUDA: "OFF"
+          OPENCV_WITH_CUDNN: "OFF"
+        run: bash installation_scripts/install_opencv.sh
+
+      - name: Install drone packages with the repository script
+        run: sudo bash installation_scripts/drone_packages.sh
+
+      # uv is the sole tool installed by a setup action, and it is installed
+      # only after the repository's system installation scripts have run.
+      - name: Install uv
+        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+
+      - name: Configure the Python workspace from the README
+        run: |
+          uv venv --python 3.10 --system-site-packages .venv
+          uv sync
+          source .venv/bin/activate
+          source /opt/ros/humble/setup.bash
+
+      - name: Build the ROS 2 workspace with colcon
+        run: |
+          source .venv/bin/activate
+          source /opt/ros/humble/setup.bash
+          colcon build --cmake-args -DOpenCV_DIR=/usr/local/lib/cmake/opencv4
+          source install/setup.bash
