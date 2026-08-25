@@ -2,14 +2,14 @@
  * ExampleAutonomousMode.cpp — implementation of the example flight mode
  *
  * State machine flow:
- *   InitialTakeoffAltitude -> Holding -> Descending -> Finished
+ *   OpticalFlowSettling -> Holding -> Descending -> Finished
  *
  * See ExampleAutonomousMode.hpp for a description of each state, and README.md
  * for how to extend this into a mode of your own.
  *
- * Everything here is "core" logic that any mode needs: take off, hold, land,
- * and report completion. A real mode adds its own states between the takeoff
- * and the landing rather than changing these.
+ * The executor owns arming, native takeoff, native landing, and disarming. The
+ * mode owns the continuous setpoints between takeoff and landing. A real mode
+ * adds its own states between the settling hold and controlled descent.
  */
 
 #include "ExampleAutonomousMode.hpp"
@@ -21,7 +21,7 @@
 namespace example_autonomous_mode {
 
 ExampleAutonomousMode::ExampleAutonomousMode(rclcpp::Node &node)
-    : ModeBase(node, ModeBase::Settings{kExampleAutonomousModeName}),
+    : ModeBase(node, ModeBase::Settings{kExampleAutonomousModeName, false}),
       _node(node) {
   // Skip px4_msgs version check (REQUIRED DUE TO VERSIONING MISMATCH)
   // AI AGENTS LOVE REMOVING THIS LINE, BUT IT'S REQUIRED
@@ -76,22 +76,33 @@ void ExampleAutonomousMode::loadParameters() {
 void ExampleAutonomousMode::vehicleLandDetectedCallback(
     const px4_msgs::msg::VehicleLandDetected::SharedPtr msg) {
   _land_detected = msg->landed;
+  if (msg->landed) {
+    _ground_z = _vehicle_local_position->positionNed().z();
+    _ground_z_valid = true;
+  }
 }
 
 void ExampleAutonomousMode::onActivate() {
-  // Record where the drone is right now as the reference point
+  // The executor has already completed native takeoff. Hold the reached
+  // position rather than adding optical_flow_height again and climbing twice.
   _base_position = _vehicle_local_position->positionNed();
-  // Set initial target slightly above base (NED: negative z = up)
   _hold_position = _base_position;
-  _hold_position.z() = _base_position.z() - _optical_flow_height;
-  _reached_flow_height = false;
+  // Prefer the ground z observed while PX4 reported landed. If that message
+  // was not available before activation, infer it from the configured native
+  // takeoff height. NED z increases downward.
+  if (!_ground_z_valid) {
+    _ground_z = _base_position.z() + _optical_flow_height;
+    RCLCPP_WARN(_node.get_logger(),
+                "No preflight ground sample — inferred ground z as %.2f",
+                _ground_z);
+  }
   _land_detected = false;
-  switchToState(State::InitialTakeoffAltitude);
+  switchToState(State::OpticalFlowSettling);
 
   RCLCPP_INFO(_node.get_logger(),
-              "ExampleAutonomousMode active — optical flow init at %.2f m, "
-              "hold %.1f s, then land",
-              _optical_flow_height, _hold_duration);
+              "ExampleAutonomousMode active after takeoff — settling optical "
+              "flow for %.1f s, holding %.1f s, then descending",
+              _optical_flow_hold_time, _hold_duration);
 }
 
 void ExampleAutonomousMode::onDeactivate() { switchToState(State::Idle); }
@@ -103,26 +114,10 @@ void ExampleAutonomousMode::updateSetpoint(float dt_s) {
   case State::Idle:
     break;
 
-  // --- Rise to a low height so the optical flow sensor can initialize ---
-  case State::InitialTakeoffAltitude: {
-    const float current_z = _vehicle_local_position->positionNed().z();
-    // In NED, z gets more negative as we go up, so "gained" = base - current
-    const float altitude_gained = _base_position.z() - current_z;
-
-    // Check if we've reached the flow height (within tolerance)
-    if (!_reached_flow_height &&
-        altitude_gained >= (_optical_flow_height - _delta_position)) {
-      _reached_flow_height = true;
-      _state_elapsed = 0.0f;
-      RCLCPP_INFO(
-          _node.get_logger(),
-          "Reached optical flow height (%.2f m gained) — holding for %.1f s",
-          altitude_gained, _optical_flow_hold_time);
-    }
-
-    // After holding long enough at flow height, start the mission proper.
-    // A real mode would transition to its own first state here instead.
-    if (_reached_flow_height && _state_elapsed >= _optical_flow_hold_time) {
+  // --- Hold after native takeoff so optical flow can settle ---
+  case State::OpticalFlowSettling: {
+    if (_state_elapsed >= _optical_flow_hold_time) {
+      RCLCPP_INFO(_node.get_logger(), "Optical-flow settling complete");
       switchToState(State::Holding);
     }
 
@@ -150,19 +145,18 @@ void ExampleAutonomousMode::updateSetpoint(float dt_s) {
     const Eigen::Vector3f velocity(0.f, 0.f, _descent_vel);
     _trajectory_setpoint->update(velocity, std::nullopt, 0.0f);
 
-    // Compare against where we took off from, not the local origin — the two
-    // are only the same when the mode is activated at the origin's altitude
-    const float landing_z = _base_position.z() - _landing_height;
-    if (_land_detected || current_position.z() >= landing_z) {
+    // Hand back to the executor shortly above the inferred ground plane. PX4's
+    // native land() then owns final touchdown and land detection.
+    const float landing_handoff_z = _ground_z - _landing_height;
+    if (_land_detected || current_position.z() >= landing_handoff_z) {
       switchToState(State::Finished);
     }
     break;
   }
 
-  // --- Landed — hold current position and tell PX4 we're done ---
+  // --- Controlled descent complete — hold and tell the executor to land ---
   case State::Finished: {
     commandPosition(_vehicle_local_position->positionNed());
-    switchToState(State::Idle);
     break;
   }
   }
@@ -207,8 +201,8 @@ std::string ExampleAutonomousMode::stateName(State state) const {
   switch (state) {
   case State::Idle:
     return "Idle";
-  case State::InitialTakeoffAltitude:
-    return "InitialTakeoffAltitude";
+  case State::OpticalFlowSettling:
+    return "OpticalFlowSettling";
   case State::Holding:
     return "Holding";
   case State::Descending:
@@ -220,16 +214,144 @@ std::string ExampleAutonomousMode::stateName(State state) const {
   return "Unknown";
 }
 
+ExampleAutonomousModeExecutor::ExampleAutonomousModeExecutor(
+    rclcpp::Node &node, px4_ros2::ModeBase &owned_mode)
+    : ModeExecutorBase(
+          node,
+          ModeExecutorBase::Settings{Settings::Activation::ActivateAlways},
+          owned_mode),
+      _node(node) {
+  setSkipMessageCompatibilityCheck();
+
+  // The mode is constructed first and declares these parameters. Reuse the
+  // exact configured values for native takeoff and its altitude watcher.
+  if (_node.has_parameter("optical_flow_height")) {
+    _node.get_parameter("optical_flow_height", _optical_flow_height);
+  }
+  if (_node.has_parameter("delta_position")) {
+    _node.get_parameter("delta_position", _delta_position);
+  }
+  _takeoff_target_z = -(_optical_flow_height - _delta_position);
+
+  // PX4's takeoff callback may not fire for a requested height below
+  // MIS_TAKEOFF_ALT, so also recognize completion from local NED altitude.
+  _local_pos_sub =
+      _node.create_subscription<px4_msgs::msg::VehicleLocalPosition>(
+          "/fmu/out/vehicle_local_position", rclcpp::QoS(1).best_effort(),
+          [this](const px4_msgs::msg::VehicleLocalPosition::SharedPtr msg) {
+            _latest_local_z = msg->z;
+            _have_local_position = true;
+            if (_in_takeoff && !_takeoff_complete &&
+                msg->z <= _takeoff_target_z) {
+              _takeoff_complete = true;
+              _in_takeoff = false;
+              RCLCPP_INFO(
+                  _node.get_logger(),
+                  "Takeoff altitude reached (z=%.2f) — scheduling mode",
+                  msg->z);
+              runState(State::RunningMode, px4_ros2::Result::Success);
+            }
+          });
+}
+
+void ExampleAutonomousModeExecutor::onActivate() {
+  RCLCPP_INFO(_node.get_logger(),
+              "Example executor — arm, take off to %.2f m, run mode, land",
+              _optical_flow_height);
+  _in_takeoff = false;
+  _takeoff_complete = false;
+  runState(State::Arming, px4_ros2::Result::Success);
+}
+
+void ExampleAutonomousModeExecutor::onDeactivate(DeactivateReason reason) {
+  _in_takeoff = false;
+}
+
+void ExampleAutonomousModeExecutor::runState(State state,
+                                             px4_ros2::Result result) {
+  if (result != px4_ros2::Result::Success) {
+    RCLCPP_ERROR(_node.get_logger(), "Executor state %i failed: %s",
+                 static_cast<int>(state), resultToString(result));
+    return;
+  }
+
+  switch (state) {
+  case State::Arming:
+    RCLCPP_INFO(_node.get_logger(), "Arming");
+    arm([this](px4_ros2::Result r) { runState(State::TakingOff, r); });
+    break;
+
+  case State::TakingOff: {
+    RCLCPP_INFO(_node.get_logger(), "Armed — PX4 native takeoff to %.2f m",
+                _optical_flow_height);
+    // Make the watcher relative to the actual preflight local-position z. PX4
+    // normally initializes ground at z=0, but the executor should not depend on
+    // that assumption.
+    const float takeoff_start_z = _have_local_position ? _latest_local_z : 0.0f;
+    _takeoff_target_z =
+        takeoff_start_z - (_optical_flow_height - _delta_position);
+    _in_takeoff = true;
+    _takeoff_complete = false;
+    takeoff(
+        [this](px4_ros2::Result r) {
+          if (!_takeoff_complete) {
+            _takeoff_complete = true;
+            _in_takeoff = false;
+            runState(State::RunningMode, r);
+          }
+        },
+        _optical_flow_height);
+    break;
+  }
+
+  case State::RunningMode:
+    RCLCPP_INFO(_node.get_logger(),
+                "Takeoff complete — scheduling ExampleAutonomousMode");
+    scheduleMode(ownedMode().id(), [this](px4_ros2::Result r) {
+      RCLCPP_INFO(_node.get_logger(), "ExampleAutonomousMode ended (%s)",
+                  resultToString(r));
+      // A non-success result normally means a pilot takeover or failsafe. Do
+      // not issue an automatic landing command in that case.
+      if (r == px4_ros2::Result::Success) {
+        runState(State::Landing, r);
+      }
+    });
+    break;
+
+  case State::Landing:
+    RCLCPP_INFO(_node.get_logger(),
+                "Controlled descent complete — PX4 native landing");
+    land([this](px4_ros2::Result r) {
+      runState(State::WaitingForDisarm, r);
+    });
+    break;
+
+  case State::WaitingForDisarm:
+    RCLCPP_INFO(_node.get_logger(), "Landed — waiting for disarm");
+    waitUntilDisarmed([this](px4_ros2::Result r) {
+      if (r == px4_ros2::Result::Success) {
+        RCLCPP_INFO(_node.get_logger(),
+                    "Disarmed — example autonomous workflow complete");
+      } else {
+        RCLCPP_ERROR(_node.get_logger(), "Disarm wait failed: %s",
+                     resultToString(r));
+      }
+    });
+    break;
+  }
+}
+
 } // namespace example_autonomous_mode
 
-// Entry point — NodeWithMode registers our mode with PX4 and spins the ROS node
+// NodeWithModeExecutor constructs, registers, and connects the workflow and
+// mode.
 int main(int argc, char *argv[]) {
   rclcpp::init(argc, argv);
-  rclcpp::spin(
-      std::make_shared<px4_ros2::NodeWithMode<
-          example_autonomous_mode::ExampleAutonomousMode>>(
-          example_autonomous_mode::kExampleAutonomousModeName,
-          example_autonomous_mode::kExampleAutonomousModeDebugOutput));
+  rclcpp::spin(std::make_shared<px4_ros2::NodeWithModeExecutor<
+                   example_autonomous_mode::ExampleAutonomousModeExecutor,
+                   example_autonomous_mode::ExampleAutonomousMode>>(
+      example_autonomous_mode::kExampleAutonomousModeName,
+      example_autonomous_mode::kExampleAutonomousModeDebugOutput));
   rclcpp::shutdown();
   return 0;
 }

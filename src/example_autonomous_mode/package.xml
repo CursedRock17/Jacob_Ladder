@@ -3,7 +3,7 @@
 <package format="3">
   <name>example_autonomous_mode</name>
   <version>0.0.1</version>
-  <description>Worked example of a PX4 external flight mode: take off to a low hover, hold, and land. Copy this package as the starting point for a new autonomous mode.</description>
+  <description>Worked example of a PX4 external mode and executor workflow: arm, take off to a low hover, hold, descend, land, and disarm.</description>
   <maintainer email="cdenihan@proton.me">Connor Denihan</maintainer>
   <license>MIT</license>
 
