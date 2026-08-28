@@ -35,15 +35,20 @@ tmux send-keys -t $SESSION:"Translation Node" "systemctl status translation_node
 
 # tmux send-keys -t $SESSION:"Camera 
 # Window 3: VIO
-echo "[3/9] Starting VIO via cuVSLAM..."
+# camera:= picks the backend: "realsense" (Intel D435i, the launch default) or
+# "oak" (OAK-D S2). Passed explicitly so this flight script does not silently
+# change camera if that default moves. One at a time -- each backend claims its
+# device exclusively.
+echo "[3/9] Starting VIO via cuVSLAM (RealSense D435i)..."
 tmux new-window -t $SESSION -n "cuVSLAM"
-tmux send-keys -t $SESSION:"cuVSLAM" "ros2 launch oak_d_visual_odometry cuvslam_px4.launch.py" Enter
+tmux send-keys -t $SESSION:"cuVSLAM" "ros2 launch oak_d_visual_odometry cuvslam_px4.launch.py camera:=realsense" Enter
 
 # Window 4: OAK-D Lite Camera Node — RETIRED 2026-07-16. The Lite was removed
-# from the airframe; the cuVSLAM node (window 3) now publishes the OAK-D S2's
-# CAM_A stream on /front/camera/image_raw + /front/camera/camera_info
-# (see rgb_topic in cuvslam_params.yaml). If the Lite returns, re-enable this
-# AND revert rgb_topic/rgb_camera_info_topic in cuvslam_params.yaml to
+# from the airframe; the cuVSLAM node (window 3) publishes the VIO camera's
+# color stream on /front/camera/image_raw + /front/camera/camera_info instead
+# (rgb_topic, set the same way in both cuvslam_params.yaml and
+# realsense_params.yaml). If the Lite returns, re-enable this AND revert
+# rgb_topic/rgb_camera_info_topic in whichever params file window 3 loads to
 # /rgb/image + /rgb/camera_info — otherwise both cameras publish on
 # /front/camera/image_raw at once.
 echo "[4/9] Camera Node retired (front camera now served by cuVSLAM window)..."
