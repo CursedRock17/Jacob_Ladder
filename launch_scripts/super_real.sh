@@ -9,6 +9,23 @@ FLIGHT_NUMBER="twelve"
 source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../jl_env.sh"
 cd "$JL_WS_ROOT" || exit 1
 
+# Source ROS + the workspace overlay for this script itself.
+jl_source_ros
+jl_source_venv
+
+# Every tmux window gets its own fresh bash, and ~/.bashrc does NOT source ROS.
+# A window can only inherit the overlay from the tmux *server*, and the server
+# may already be running from an unrelated session with a stale environment.
+# So each window sources the workspace explicitly before running its node --
+# otherwise `ros2 launch` searches only /opt/ros/humble and reports every
+# workspace package as "not found".
+JL_SETUP="source $JL_WS_ROOT/jl_env.sh && jl_source_ros && jl_source_venv && cd $JL_WS_ROOT"
+
+# tmux_run <window> <command> -- sources the workspace, then runs the command.
+tmux_run() {
+    tmux send-keys -t "$SESSION:$1" "$JL_SETUP && $2" Enter
+}
+
 # Create a logging directory
 
 mkdir -p flight_logs/${FLIGHT_NUMBER}_flight
@@ -39,9 +56,17 @@ tmux send-keys -t $SESSION:"Translation Node" "systemctl status translation_node
 # "oak" (OAK-D S2). Passed explicitly so this flight script does not silently
 # change camera if that default moves. One at a time -- each backend claims its
 # device exclusively.
-echo "[3/9] Starting VIO via cuVSLAM (RealSense D435i)..."
+# vio.service runs this exact launch file. Both claim the D435i exclusively,
+# so starting a second copy here would fail on a busy device and leave the
+# flight with no position estimate. If the service is up, just tail its log.
 tmux new-window -t $SESSION -n "cuVSLAM"
-tmux send-keys -t $SESSION:"cuVSLAM" "ros2 launch oak_d_visual_odometry cuvslam_px4.launch.py camera:=realsense" Enter
+if systemctl is-active --quiet vio.service; then
+    echo "[3/9] VIO already running as vio.service — showing its log..."
+    tmux send-keys -t $SESSION:"cuVSLAM" "systemctl status vio.service --no-pager; journalctl -u vio.service -f" Enter
+else
+    echo "[3/9] Starting VIO via cuVSLAM (RealSense D435i)..."
+    tmux_run "cuVSLAM" "ros2 launch oak_d_visual_odometry cuvslam_px4.launch.py camera:=realsense"
+fi
 
 # Window 4: OAK-D Lite Camera Node — RETIRED 2026-07-16. The Lite was removed
 # from the airframe; the cuVSLAM node (window 3) publishes the VIO camera's
@@ -63,17 +88,17 @@ tmux new-window -t $SESSION -n "Aruco Tracker"
 # Window 5: Drogue Detection (Option 2)
 echo "[6/9] Starting Drouge Ranging..."
 tmux new-window -t $SESSION -n "Drogue Detection"
-tmux send-keys -t $SESSION:"Drogue Detection" "ros2 run ros2_yolo_image_processing drogue_detection_node --ros-args -r image_raw:=/front/camera/image_raw" Enter
+tmux_run "Drogue Detection" "ros2 run ros2_yolo_image_processing drogue_detection_node --ros-args -r image_raw:=/front/camera/image_raw"
 
 # Window 9 (Additional): Drogue Pose (Option 2)
 echo "[9/9] Starting Drouge Pose..."
 tmux new-window -t $SESSION -n "Drogue Pose"
-tmux send-keys -t $SESSION:"Drogue Pose" "ros2 run ros2_yolo_image_processing pose_estimation_node --ros-args -r camera_info:=/front/camera/camera_info" Enter
+tmux_run "Drogue Pose" "ros2 run ros2_yolo_image_processing pose_estimation_node --ros-args -r camera_info:=/front/camera/camera_info"
 
 # Window 6: Autonomous ROS Code
 echo "[6/9] Starting Autonomous ROS Code..."
 tmux new-window -t $SESSION -n "Autonomous ROS Code"
-tmux send-keys -t $SESSION:"Autonomous ROS Code" "ros2 launch drogue_flight autonomous_smooth_flight.lauch.py | tee flight_logs/third_flight/drogue_flight.txt" Enter
+tmux_run "Autonomous ROS Code" "ros2 launch drogue_flight autonomous_smooth_flight.launch.py 2>&1 | tee flight_logs/${FLIGHT_NUMBER}_flight/drogue_flight.txt"
 
 # Window 7 ROS Bag
 echo "[7/9] Starting ROS Bag..."

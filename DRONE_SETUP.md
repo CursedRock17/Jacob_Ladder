@@ -121,12 +121,17 @@ Notes:
   set `XRCE_DEV=/dev/ttyUSB0` via a `systemctl edit dds_agent` drop-in to go back
   to the USB-TTL adapter. No sudo needed thanks to step 3. If the flight
   controller isn't plugged in, the unit restarts every 5 s until it appears.
-- Camera / aruco / precision-land / cuVSLAM are still launched manually via
+- Aruco / precision-land are still launched manually via
   `launch_scripts/super_real.sh` (tmux). Their service files
-  (`usb_cam.service.in`, `aruco_tracker.service.in`) exist in `services/` but
+  (`aruco_tracker.service.in`) exist in `services/` but
   were not enabled in this setup.
-- `usb_cam.service` runs the OAK-D visual-odometry publisher, not a USB camera
-  driver — the unit name is historical. Until 2026-07-30 `run_usb_cam.sh` named
+- `vio.service` runs the cuVSLAM visual-odometry publisher. It was called
+  `usb_cam.service` until 2026-09-02 — a historical name that described neither
+  the camera nor the job. Enabling it makes the drone come up flight-ready with
+  no laptop and no network: `dds_agent` + `translation_node` + `vio` are the
+  whole GPS-denied position-estimate chain. `super_real.sh` detects it and
+  tails its log instead of starting a second copy that would fight for the
+  camera. Until 2026-07-30 `run_usb_cam.sh` named
   `vo_publisher_px4_node`, which has never existed, so the unit failed with
   `No executable found` and restarted every 5 s; it now runs
   `cuvslam_publisher_px4_node`. Cross-check against
@@ -292,7 +297,7 @@ RX). The `useful_commands.txt` snippet is not a valid check here — it uses
 | `dds_agent.service` | **enabled** | the XRCE-DDS link to the FC, `/dev/ttyTHS1` @ 921600 |
 | `translation_node.service` | **enabled** | PX4 message translation |
 | `aruco_tracker.service` | disabled | grabs a camera; launched via `super_real.sh` instead |
-| `usb_cam.service` | disabled | grabs the OAK-D; would fight `super_real.sh` |
+| `vio.service` | **enabled** | cuVSLAM VIO; renamed from `usb_cam.service` 2026-09-02 |
 | `dds-agent.service` (ARK's, user-level) | **disabled** | conflicts — see the warning in section 4 |
 
 ```bash

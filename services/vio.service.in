@@ -1,0 +1,28 @@
+[Unit]
+Description=cuVSLAM Visual Odometry (VIO) for PX4
+Documentation=file://@JL_WS_ROOT@/DRONE_SETUP.md
+# VIO needs no network: the camera is USB and the link to the flight
+# controller is the serial line dds_agent owns. Deliberately NOT ordered
+# after network-online.target so the drone reaches a flyable state with the
+# radio absent or the antennas unplugged.
+After=dds_agent.service
+Wants=dds_agent.service
+# The D435i can take several seconds to enumerate after power-up, and a
+# restart loop must not give up: without this, systemd stops retrying after
+# 5 failures in 10s and the drone boots with no position estimate.
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+User=@JL_USER@
+Group=@JL_GROUP@
+WorkingDirectory=@JL_WS_ROOT@
+ExecStart=/bin/bash @JL_WS_ROOT@/services/run_vio.sh
+Restart=on-failure
+RestartSec=5s
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=vio_service
+
+[Install]
+WantedBy=multi-user.target
