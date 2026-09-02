@@ -408,6 +408,20 @@ class CuVslamPublisherNode(Node):
         # (2026-07-13 bench cover test: 163 m teleports reached PX4 that
         # way). Healthy scenes on this rig run 24-110 landmarks.
         self.declare_parameter("min_landmarks_3d", 10)
+        # Landmark-count variance scaling. The cuVSLAM covariance and the
+        # empirical window scatter both react to pose noise that has ALREADY
+        # happened; the triangulated-landmark count drops first, while the
+        # pose still looks self-consistent. Inflating the reported variance by
+        # (100 / quality)^2 -- quality being the same landmark-scaled figure
+        # sent in VehicleOdometry.quality -- de-weights vision in EKF2 as the
+        # scene thins out, instead of holding nominal confidence right up to
+        # the min_landmarks_3d cliff where the pose is withheld entirely.
+        # Squared because variance is in m^2: a 2x-worse-constrained pose is
+        # 4x the variance. Scale is 1.0 at quality 100 (>=50 landmarks) and
+        # clamps at quality_variance_max_scale so a single bad frame cannot
+        # push vision to effectively-infinite variance.
+        self.declare_parameter("quality_variance_scaling", True)
+        self.declare_parameter("quality_variance_max_scale", 25.0)
 
         # -- IMU fusion (only used when enable_imu_fusion is true) --
         # Defaults are placeholders
@@ -580,6 +594,12 @@ class CuVslamPublisherNode(Node):
             self.get_parameter("reacquire_stable_frames").value
         )
         self._min_landmarks_3d = int(self.get_parameter("min_landmarks_3d").value)
+        self._quality_variance_scaling = bool(
+            self.get_parameter("quality_variance_scaling").value
+        )
+        self._quality_variance_max_scale = max(
+            1.0, float(self.get_parameter("quality_variance_max_scale").value)
+        )
         self._imu_extrinsics_source = (
             str(self.get_parameter("imu_extrinsics_source").value).strip().lower()
         )
@@ -1755,7 +1775,33 @@ class CuVslamPublisherNode(Node):
                 ori_var, np.diag(R_body_world @ cov_rot_world @ R_body_world.T)
             )
 
+        # Inflate by scene quality last, so it compounds with whichever of the
+        # floor / empirical / tracker covariance won above rather than being
+        # masked by a np.maximum against them.
+        scale = self._quality_variance_scale()
+        if scale > 1.0:
+            pos_var = pos_var * scale
+            ori_var = ori_var * scale
+
         return pos_var.astype(np.float32), ori_var.astype(np.float32)
+
+    def _quality_variance_scale(self) -> float:
+        """Variance multiplier from the current landmark-scaled quality.
+
+        (100 / quality)^2, clamped to [1, quality_variance_max_scale]. Returns
+        1.0 (no inflation) when scaling is disabled or the landmark count is
+        unavailable, matching _px4_quality's no-information fallback of 100.
+        """
+        if not self._quality_variance_scaling:
+            return 1.0
+        if self._last_landmarks_3d is None:
+            return 1.0
+        quality = self._px4_quality()
+        if quality >= 100:
+            return 1.0
+        return float(
+            np.clip((100.0 / quality) ** 2, 1.0, self._quality_variance_max_scale)
+        )
 
     def _feature_color(self, track_id: int) -> tuple[int, int, int]:
         """Return a stable BGR color for a feature track id."""
