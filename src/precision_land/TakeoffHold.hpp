@@ -2,10 +2,13 @@
 
 #include "StatePublisher.hpp"
 
+#include <px4_ros2/components/health_and_arming_checks.hpp>
 #include <px4_ros2/components/mode.hpp>
 #include <px4_ros2/components/mode_executor.hpp>
 #include <px4_ros2/control/setpoint_types/experimental/trajectory.hpp>
 #include <px4_ros2/odometry/local_position.hpp>
+
+#include <px4_msgs/msg/vehicle_odometry.hpp>
 
 #include <rclcpp/rclcpp.hpp>
 
@@ -29,6 +32,13 @@ public:
 	void onDeactivate() override;
 	void updateSetpoint(float dt_s) override;
 
+	// Reports why the vehicle cannot arm, straight into QGC's health list.
+	// The airframe has no WiFi, so there is no shell to diagnose from: PX4's
+	// generic "no local position estimate" is the only signal that reaches
+	// the pilot, and it does not distinguish a camera that never enumerated
+	// from an EKF that is not configured to fuse vision.
+	void checkArmingAndRunConditions(px4_ros2::HealthAndArmingCheckReporter& reporter) override;
+
 	// Shared with the executor so the whole flight is one state timeline.
 	StatePublisher& statePublisher() { return _state_pub; }
 
@@ -44,6 +54,11 @@ private:
 
 	std::shared_ptr<px4_ros2::OdometryLocalPosition> _vehicle_local_position;
 	std::shared_ptr<px4_ros2::TrajectorySetpointType> _trajectory_setpoint;
+
+	// Watches the same topic the VIO node publishes to PX4, so the check can
+	// tell "no vision arriving" apart from "vision arriving, EKF ignoring it".
+	rclcpp::Subscription<px4_msgs::msg::VehicleOdometry>::SharedPtr _visual_odometry_sub;
+	rclcpp::Time _last_visual_odometry{0, 0, RCL_ROS_TIME};
 
 	Eigen::Vector3f _base_position;
 	Eigen::Vector3f _hold_position;

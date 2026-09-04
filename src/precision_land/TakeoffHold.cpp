@@ -34,6 +34,68 @@ TakeoffHoldMode::TakeoffHoldMode(rclcpp::Node& node)
 	_node.get_parameter("target_height", _target_height);
 	_node.get_parameter("climb_rate", _climb_rate);
 	_node.get_parameter("delta_position", _delta_position);
+
+	// Best-effort: this is exactly the QoS the uXRCE-DDS bridge publishes
+	// VehicleOdometry with, and a reliable subscriber would never match it.
+	rclcpp::QoS qos(rclcpp::KeepLast(1));
+	qos.best_effort().durability_volatile();
+	_visual_odometry_sub = _node.create_subscription<px4_msgs::msg::VehicleOdometry>(
+		"/fmu/in/vehicle_visual_odometry", qos,
+		[this](px4_msgs::msg::VehicleOdometry::UniquePtr /*msg*/) {
+			_last_visual_odometry = _node.now();
+		});
+}
+
+// Runs at ~1 Hz while PX4 polls external arming checks. Every failure reported
+// here shows up in QGC's health list and blocks arming, so the messages have
+// to name the thing the pilot can actually act on.
+void TakeoffHoldMode::checkArmingAndRunConditions(px4_ros2::HealthAndArmingCheckReporter& reporter)
+{
+	// 3 s: VIO publishes at 30 Hz, so this tolerates a long stall without
+	// flapping, and still reports well within a pre-flight check.
+	constexpr double kVisualOdometryTimeoutS = 3.0;
+
+	const bool ever_received = _last_visual_odometry.nanoseconds() > 0;
+	const double age_s =
+		ever_received ? (_node.now() - _last_visual_odometry).seconds() : 0.0;
+
+	// Journal-visible mirror of what QGC is being told. With no shell on the
+	// airframe this is the only way to reconstruct, after landing, what the
+	// arming check saw at the time.
+	RCLCPP_INFO_THROTTLE(
+		_node.get_logger(), *_node.get_clock(), 5000,
+		"arming check: vio_received=%d vio_age=%.1fs xy_valid=%d z_valid=%d",
+		static_cast<int>(ever_received), age_s,
+		static_cast<int>(_vehicle_local_position->positionXYValid()),
+		static_cast<int>(_vehicle_local_position->positionZValid()));
+
+	if (!ever_received || age_s > kVisualOdometryTimeoutS) {
+		// The camera did not enumerate, or the VIO node is down. This is the
+		// case that grounded the 2026-09-04 test: vio.service reported
+		// "active" while publishing nothing, and PX4 could only say it had no
+		// local position.
+		/* EVENT
+		 */
+		reporter.armingCheckFailureExt(
+			px4_ros2::events::ID("check_takeoff_hold_no_vio"),
+			px4_ros2::events::Log::Error,
+			"No VIO: check D435i USB and vio.service");
+		return;
+	}
+
+	// Vision is arriving but the EKF is not producing a usable position from
+	// it -- a PX4-side problem (EKF2_EV_CTRL / EKF2_HGT_REF / EKF2_GPS_CTRL),
+	// or simply not converged yet. Distinguishing this from the case above is
+	// the entire point: the two look identical from the cockpit otherwise.
+	if (!_vehicle_local_position->positionXYValid() ||
+		!_vehicle_local_position->positionZValid()) {
+		/* EVENT
+		 */
+		reporter.armingCheckFailureExt(
+			px4_ros2::events::ID("check_takeoff_hold_no_local_position"),
+			px4_ros2::events::Log::Error,
+			"VIO OK but EKF position invalid: check EKF2_EV_CTRL, or wait to converge");
+	}
 }
 
 void TakeoffHoldMode::onActivate()
