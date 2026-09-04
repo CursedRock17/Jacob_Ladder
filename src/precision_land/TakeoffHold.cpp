@@ -1,6 +1,9 @@
 #include "TakeoffHold.hpp"
 
 #include <px4_ros2/components/node_with_mode.hpp>
+#include <px4_ros2/components/wait_for_fmu.hpp>
+
+#include <chrono>
 
 namespace precision_land
 {
@@ -200,12 +203,54 @@ void TakeoffHoldExecutor::runState(State state, px4_ros2::Result result)
 
 } // namespace precision_land
 
+// Registration is a one-shot request/reply made from the NodeWithModeExecutor
+// constructor, which throws if PX4 does not answer within ~25 s. At boot the
+// uXRCE-DDS agent has not established its session yet, so the process exited
+// and the mode was absent from `commander status` and QGC for the rest of the
+// flight even after the link came up. Wait for a real FMU heartbeat first,
+// then keep retrying. See DroneSmoothPlanner.cpp for the same treatment.
 int main(int argc, char* argv[])
 {
+	using namespace std::chrono_literals;
+
 	rclcpp::init(argc, argv);
-	rclcpp::spin(std::make_shared<px4_ros2::NodeWithModeExecutor<
-		precision_land::TakeoffHoldExecutor, precision_land::TakeoffHoldMode>>(
-		precision_land::kTakeoffHoldModeName, precision_land::kTakeoffHoldDebugOutput));
+
+	// waitForFMU needs a node that is not the mode node -- constructing that
+	// is what triggers registration.
+	{
+		auto startup_node = std::make_shared<rclcpp::Node>("takeoff_hold_startup");
+
+		if (!px4_ros2::waitForFMU(*startup_node, 60s)) {
+			RCLCPP_WARN(
+				startup_node->get_logger(),
+				"No FMU heartbeat after 60s -- is dds_agent running and the TELEM2 link up? "
+				"Continuing to retry registration anyway.");
+		}
+	}
+
+	auto retry_delay = 2s;
+
+	while (rclcpp::ok()) {
+		try {
+			auto node = std::make_shared<px4_ros2::NodeWithModeExecutor<
+				precision_land::TakeoffHoldExecutor, precision_land::TakeoffHoldMode>>(
+				precision_land::kTakeoffHoldModeName, precision_land::kTakeoffHoldDebugOutput);
+
+			RCLCPP_INFO(
+				node->get_logger(), "Registered '%s' with PX4",
+				precision_land::kTakeoffHoldModeName);
+			rclcpp::spin(node);
+			break;
+
+		} catch (const std::runtime_error& e) {
+			RCLCPP_WARN(
+				rclcpp::get_logger("takeoff_hold"),
+				"Mode registration failed (%s); retrying in %lds",
+				e.what(), static_cast<long>(retry_delay.count()));
+			rclcpp::sleep_for(retry_delay);
+		}
+	}
+
 	rclcpp::shutdown();
 	return 0;
 }
