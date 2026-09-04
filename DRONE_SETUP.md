@@ -298,6 +298,7 @@ RX). The `useful_commands.txt` snippet is not a valid check here — it uses
 | `translation_node.service` | **enabled** | PX4 message translation |
 | `aruco_tracker.service` | disabled | grabs a camera; launched via `super_real.sh` instead |
 | `vio.service` | **enabled** | cuVSLAM VIO; renamed from `usb_cam.service` 2026-09-02 |
+| `takeoff_hold.service` | **enabled** | registers the `TakeoffHold` external mode with PX4 |
 | `dds-agent.service` (ARK's, user-level) | **disabled** | conflicts — see the warning in section 4 |
 
 ```bash
