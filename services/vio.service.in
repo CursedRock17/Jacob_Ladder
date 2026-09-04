@@ -18,7 +18,12 @@ User=@JL_USER@
 Group=@JL_GROUP@
 WorkingDirectory=@JL_WS_ROOT@
 ExecStart=/bin/bash @JL_WS_ROOT@/services/run_vio.sh
-Restart=on-failure
+# Restart=always, not on-failure: `ros2 launch` exits 0 even when the node it
+# supervises dies (verified 2026-09-04 -- the camera pipeline exited 1, launch
+# reported success, and systemd left the service dead). This service has no
+# successful exit: if it stops for any reason short of an explicit
+# `systemctl stop`, the drone has no position estimate and it must come back.
+Restart=always
 RestartSec=5s
 StandardOutput=journal
 StandardError=journal

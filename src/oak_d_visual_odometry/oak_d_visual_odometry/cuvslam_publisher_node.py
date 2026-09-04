@@ -26,6 +26,7 @@ from dataclasses import dataclass
 from datetime import timedelta
 import math
 import re
+import sys
 import threading
 import time
 from typing import Any
@@ -159,6 +160,15 @@ class CuVslamPublisherNode(Node):
         self._rate_last_time = time.monotonic()
 
         self._stop = threading.Event()
+        # Set when the camera pipeline dies. The pipeline runs in a daemon
+        # thread, so without this the thread exits and the main thread keeps
+        # spinning happily: the node stays "active" under systemd, keeps its
+        # publishers registered, and publishes nothing. A camera that failed
+        # to enumerate at boot then looks identical to a healthy one, and the
+        # first sign of trouble is EKF2 refusing to arm for want of a position
+        # estimate. Exiting non-zero instead lets Restart=on-failure retry
+        # until the camera is actually there.
+        self.pipeline_failed = False
         self._worker = threading.Thread(target=self._pipeline_loop, daemon=True)
         self._worker.start()
 
@@ -729,6 +739,10 @@ class CuVslamPublisherNode(Node):
         except Exception as exc:
             print(f"[cuvslam] pipeline EXCEPTION: {exc!r}", flush=True)
             self.get_logger().error(f"cuVSLAM RealSense pipeline failed: {exc}")
+            self.pipeline_failed = True
+            # Wake the main thread out of rclpy.spin() so the process can exit
+            # non-zero rather than idling as a publisher of nothing.
+            rclpy.try_shutdown()
         finally:
             if source is not None:
                 source.close()
@@ -836,6 +850,10 @@ class CuVslamPublisherNode(Node):
         except Exception as exc:
             print(f"[cuvslam] pipeline EXCEPTION: {exc!r}", flush=True)
             self.get_logger().error(f"cuVSLAM pipeline failed: {exc}")
+            self.pipeline_failed = True
+            # Wake the main thread out of rclpy.spin() so the process can exit
+            # non-zero rather than idling as a publisher of nothing.
+            rclpy.try_shutdown()
         finally:
             if device is not None:
                 try:
@@ -1982,11 +2000,17 @@ def main(args=None, publish_px4: bool = False):
         # down. Fall through to clean up the node and shut down idempotently.
         pass
     finally:
+        pipeline_failed = node is not None and node.pipeline_failed
         if node is not None:
             node.destroy_node()
         # try_shutdown() is a no-op if the context is already shut down, so it
         # never raises "rcl_shutdown already called" the way shutdown() does.
         rclpy.try_shutdown()
+        if pipeline_failed:
+            # Non-zero so systemd's Restart=on-failure fires. Combined with
+            # StartLimitIntervalSec=0 in vio.service this retries forever,
+            # which is what a drone waiting on a slow-enumerating D435i needs.
+            sys.exit(1)
 
 
 if __name__ == "__main__":
