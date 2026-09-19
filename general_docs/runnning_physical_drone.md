@@ -87,7 +87,7 @@ You will find a variety of services in the [services directory](../services) whi
 There are a couple of services already set in the provided folder which run on boot of the devices (as of 05/2026):
   - **dds_agent** : Opens a connection on the `/dev/ttyUSB0` port at 921600 baud, for the `MicroXRCEAgent`.
   - **translation_node** : Sources and runs the node for translating old `px4_msgs` into their desired version.
-  - **usb_cam** : *Most likely* to be changed. Runs the VIO publisher for an OAK-D Pro camera at start to provide Visual Odometry capabilities to the EKF2.
+  - **vio** (was `usb_cam`) : *Most likely* to be changed. Runs the VIO publisher for an OAK-D Pro camera at start to provide Visual Odometry capabilities to the EKF2.
 
 #### SSH Shells:
 There are various commands that we need to run in parallel when running our physical drone, that are almost identical to running in simulation. The reference for this code lives in the [launch_scripts section](../launch_scripts/super_real.sh)
