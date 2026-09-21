@@ -471,19 +471,6 @@ void DroneSmoothPlannerExecutor::runState(State state,
 
 } // namespace drogue_flight
 
-<<<<<<< HEAD
-// NodeWithModeExecutor wires the executor + mode together and registers with
-// PX4
-int main(int argc, char *argv[]) {
-  rclcpp::init(argc, argv);
-  rclcpp::spin(std::make_shared<px4_ros2::NodeWithModeExecutor<
-                   drogue_flight::DroneSmoothPlannerExecutor,
-                   drogue_flight::DroneSmoothPlanner>>(
-      drogue_flight::kDroneSmoothPlannerModeName,
-      drogue_flight::kDroneSmoothPlannerDebugOutput));
-  rclcpp::shutdown();
-  return 0;
-=======
 // NodeWithModeExecutor wires the executor + mode together and registers with PX4
 //
 // Registration is a single request/reply round-trip with a 1 s timeout, made
@@ -544,5 +531,4 @@ int main(int argc, char* argv[])
 
 	rclcpp::shutdown();
 	return 0;
->>>>>>> origin/main
 }
