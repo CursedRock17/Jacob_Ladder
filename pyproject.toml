@@ -11,6 +11,10 @@ dependencies = [
     "empy==3.3.4",
     "lark>=1.1.9",
     "numpy>=1.24,<2",
+    # Intel RealSense D400-series support (camera_type: realsense in
+    # oak_d_visual_odometry). Ships an aarch64/cp310 manylinux wheel with
+    # librealsense bundled, so no apt/source build is needed on JetPack.
+    "pyrealsense2",
     "rerun-sdk",
     "ruff",
     "scipy",

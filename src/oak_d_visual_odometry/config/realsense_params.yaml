@@ -1,0 +1,134 @@
+# Intel RealSense D435i configuration for the cuVSLAM publisher.
+#
+# Same node, same tracking/gating/PX4 code as cuvslam_params.yaml -- only the
+# camera backend changes. Run one camera at a time: each backend claims its
+# device exclusively.
+#
+#   ros2 launch oak_d_visual_odometry cuvslam_px4.launch.py camera:=realsense
+#
+# Differences from the OAK-D that are baked into the values below:
+#   * The infrared pair is rectified in hardware (identical intrinsics,
+#     identity relative rotation, zero distortion), so rectified_stereo_camera
+#     is true and the border masks are zero -- there are no distorted borders
+#     to trim, and the two eyes overlap across the full frame.
+#   * The rig origin is the LEFT INFRARED camera (the D400 depth datum), not
+#     the color camera as on the OAK-D. Measure t_body_cam to the left IR lens.
+#   * The IR projector is disabled. Its dot pattern is fixed to the camera
+#     body, so it is static in the image while the scene moves: feature tracks
+#     latch onto the dots and the pose stops responding to motion.
+
+oak_d_cuvslam_publisher:
+  ros__parameters:
+    camera_type: realsense
+    # librealsense serial number. Empty opens the first RealSense found.
+    device_id: "261222078979"
+    width: 640
+    height: 480
+    camera_fps: 30.0
+    rgb_fps: 15.0
+    rgb_width: 640
+    rgb_height: 480
+    warmup_frames: 30
+    publish_rgb: true
+    publish_stereo_images: false
+    publish_features: true
+    feature_point_radius: 3
+    # No Motion Module enumerates on a stock JetPack kernel (the D435i's
+    # BMI055 is an HID device needing hid_sensor_*/IIO). The node detects
+    # this at open() and forces both of these off; they are left true here so
+    # the IMU comes back automatically on a kernel that does expose it.
+    publish_imu: true
+    enable_imu_fusion: false
+    # Hardware-rectified: let cuVSLAM skip its own rectification.
+    rectified_stereo_camera: true
+    use_gpu: true
+    async_sba: false
+    # Auto exposure is right for odometry, but the firmware's default ceiling
+    # (~165 ms) smears features on a moving airframe. 8 ms bounds motion blur
+    # to well under a pixel at handheld speeds; raise it if indoor scenes come
+    # out too dark to hold features.
+    realsense_emitter_enabled: false
+    realsense_auto_exposure_limit_us: 8000.0
+    # Rectified pair, full overlap, no distortion -> nothing to mask.
+    left_border_mask: [0, 0, 0, 0]
+    right_border_mask: [0, 0, 0, 0]
+    world_frame_id: cuvslam_world
+    rig_frame_id: realsense_camera
+    left_frame_id: realsense_left_ir
+    right_frame_id: realsense_right_ir
+    imu_frame_id: realsense_imu
+    odom_topic: /slam/odometry
+    imu_topic: /imu/data
+    rgb_topic: /front/camera/image_raw
+    rgb_camera_info_topic: /front/camera/camera_info
+    left_image_topic: /left/image
+    right_image_topic: /right/image
+    left_camera_info_topic: /left/camera_info
+    right_camera_info_topic: /right/camera_info
+
+oak_d_cuvslam_px4_publisher:
+  ros__parameters:
+    camera_type: realsense
+    device_id: "261222078979"
+    width: 640
+    height: 480
+    # USB2 (this rig enumerates at 2.1) caps the IR pair at 640x480@30 and
+    # makes the color stream contend for the same ~35 MB/s, so the OAK-D's
+    # 40/10 split does not apply here. Re-measure the "track() stats" line
+    # after any change: n/10 must equal camera_fps, frame_gaps must be 0, and
+    # ev_lat must stay under ~100 ms.
+    camera_fps: 30.0
+    rgb_fps: 15.0
+    rgb_width: 640
+    rgb_height: 480
+    warmup_frames: 30
+    publish_rgb: true
+    publish_stereo_images: false
+    publish_features: true
+    feature_point_radius: 3
+    publish_imu: true
+    # Stereo-only. Unlike the OAK-D this is not a tuning choice: no Motion
+    # Module enumerates on this kernel, so there is no IMU to fuse. The node
+    # forces this false at open() when the motion sensor is absent.
+    enable_imu_fusion: false
+    rectified_stereo_camera: true
+    use_gpu: true
+    async_sba: false
+    realsense_emitter_enabled: false
+    realsense_auto_exposure_limit_us: 8000.0
+    left_border_mask: [0, 0, 0, 0]
+    right_border_mask: [0, 0, 0, 0]
+    world_frame_id: cuvslam_world
+    rig_frame_id: realsense_camera
+    left_frame_id: realsense_left_ir
+    right_frame_id: realsense_right_ir
+    imu_frame_id: realsense_imu
+    odom_topic: /slam/odometry
+    imu_topic: /imu/data
+    rgb_topic: /front/camera/image_raw
+    rgb_camera_info_topic: /front/camera/camera_info
+    px4_topic: /fmu/in/vehicle_visual_odometry
+    init_yaw_offset_deg: 0.0
+    camera_mounting: forward
+    # PLACEHOLDER -- measure this before flying the D435i. It is the rig
+    # origin (the LEFT INFRARED lens, not the color lens) in body FRD, and it
+    # is not the same point as the OAK-D's CAM_A. Keep EKF2_EV_POS_X/Y/Z at 0;
+    # the node applies this arm itself.
+    t_body_cam: [0.0, 0.0, 0.0]
+    R_body_cam_override: []
+    max_frame_delta_s: -1.0
+    multicam_mode: ""
+    position_variance: [0.01, 0.01, 0.02]
+    orientation_variance: [0.01, 0.01, 0.02]
+    velocity_variance: [0.1, 0.1, 0.1]
+    use_cuvslam_covariance: false
+    velocity_window_frames: 10
+    use_empirical_covariance: false
+    slow_track_warn_ms: 60.0
+    velocity_reset_gap_s: 0.5
+    max_vio_speed_mps: 10.0
+    # Same covered-lens failure applies to the D435i: with the emitter off a
+    # dark or blocked scene still yields self-consistent 2D noise tracks with
+    # zero triangulated landmarks. Re-check the healthy range on this camera
+    # from the ~/diagnostics landmarks_3d key before trusting the value.
+    min_landmarks_3d: 10

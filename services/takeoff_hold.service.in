@@ -1,0 +1,27 @@
+[Unit]
+Description=PX4 external mode: autonomous TakeoffHold
+Documentation=file://@JL_WS_ROOT@/DRONE_SETUP.md
+# Needs the DDS link to reach PX4 at all, but must not be ordered behind the
+# network: the airframe flies with no WiFi.
+After=dds_agent.service
+Wants=dds_agent.service
+# Registration retries until the FMU answers, so a slow uXRCE session must not
+# exhaust a start limit and leave the mode permanently absent from QGC.
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+User=@JL_USER@
+Group=@JL_GROUP@
+WorkingDirectory=@JL_WS_ROOT@
+ExecStart=/bin/bash @JL_WS_ROOT@/services/run_takeoff_hold.sh
+# always, not on-failure: `ros2 launch` exits 0 even when the node under it
+# dies, so on-failure would silently leave the mode missing.
+Restart=always
+RestartSec=5s
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=takeoff_hold_service
+
+[Install]
+WantedBy=multi-user.target

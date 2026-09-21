@@ -26,12 +26,12 @@ from dataclasses import dataclass
 from datetime import timedelta
 import math
 import re
+import sys
 import threading
 import time
 from typing import Any
 
 import cv2
-import depthai as dai
 import numpy as np
 
 from cv_bridge import CvBridge
@@ -48,6 +48,16 @@ from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, HistoryPolicy, QoSProfile, ReliabilityPolicy
 
 from . import frames
+from .realsense_source import RealSenseSource
+
+try:
+    import depthai as dai
+
+    DEPTHAI_IMPORT_ERROR = None
+except ImportError as exc:
+    # Optional: a RealSense-only host does not need the DepthAI stack.
+    dai = None  # ty: ignore[invalid-assignment]
+    DEPTHAI_IMPORT_ERROR = exc
 
 try:
     import cuvslam as vslam
@@ -150,12 +160,22 @@ class CuVslamPublisherNode(Node):
         self._rate_last_time = time.monotonic()
 
         self._stop = threading.Event()
+        # Set when the camera pipeline dies. The pipeline runs in a daemon
+        # thread, so without this the thread exits and the main thread keeps
+        # spinning happily: the node stays "active" under systemd, keeps its
+        # publishers registered, and publishes nothing. A camera that failed
+        # to enumerate at boot then looks identical to a healthy one, and the
+        # first sign of trouble is EKF2 refusing to arm for want of a position
+        # estimate. Exiting non-zero instead lets Restart=on-failure retry
+        # until the camera is actually there.
+        self.pipeline_failed = False
         self._worker = threading.Thread(target=self._pipeline_loop, daemon=True)
         self._worker.start()
 
         mode = "stereo+IMU" if self._enable_imu_fusion else "stereo"
+        backend = "RealSense" if self._camera_type == "realsense" else "OAK-D DepthAI"
         self.get_logger().info(
-            f"{node_name} started; opening OAK-D DepthAI pipeline for cuVSLAM ({mode})"
+            f"{node_name} started; opening {backend} pipeline for cuVSLAM ({mode})"
         )
 
     def _create_publishers(self):
@@ -235,9 +255,16 @@ class CuVslamPublisherNode(Node):
     # ---------- parameters ----------
 
     def _declare_params(self):
-        # -- DepthAI device & streams --
-        # Pin to a specific OAK device by DepthAI deviceId (MXID). Empty means
-        # first available — unsafe when a second OAK is also plugged in.
+        # -- camera backend --
+        # "oak" drives an OAK-D over DepthAI; "realsense" drives an Intel
+        # D400-series (D435i) over pyrealsense2. One at a time: both claim
+        # their device exclusively, and cuVSLAM gets a single stereo rig.
+        self.declare_parameter("camera_type", "oak")
+
+        # -- device & streams --
+        # Which physical camera to open: a DepthAI deviceId (MXID) for "oak",
+        # a librealsense serial number for "realsense". Empty means first
+        # available — unsafe when a second camera is also plugged in.
         self.declare_parameter("device_id", "")
         self.declare_parameter("width", 640)
         self.declare_parameter("height", 480)
@@ -291,6 +318,23 @@ class CuVslamPublisherNode(Node):
 
         self.declare_parameter("left_border_mask", [0, 0, 0, 0])
         self.declare_parameter("right_border_mask", [0, 0, 0, 0])
+
+        # -- RealSense-only knobs (ignored when camera_type is "oak") --
+        # The D435i projector is bolted to the camera body, so its dot pattern
+        # is static in the image while the scene moves: feature tracks latch
+        # onto the dots and the pose stops responding to motion. Off is the
+        # only correct setting for odometry.
+        self.declare_parameter("realsense_emitter_enabled", False)
+        self.declare_parameter("realsense_laser_power", -1.0)
+        # Auto exposure is right for odometry, but the default ceiling
+        # (~165 ms) smears features on a moving airframe. <= 0 leaves the
+        # firmware default alone.
+        self.declare_parameter("realsense_auto_exposure_limit_us", 8000.0)
+        # The color stream runs at its own resolution: on USB2 the IR pair and
+        # the color stream share ~35 MB/s, so RGB usually wants to be smaller
+        # and slower than the stereo pair. 0 reuses width/height.
+        self.declare_parameter("rgb_width", 0)
+        self.declare_parameter("rgb_height", 0)
 
         # -- frame ids & topic names --
         self.declare_parameter("world_frame_id", "cuvslam_world")
@@ -374,6 +418,20 @@ class CuVslamPublisherNode(Node):
         # (2026-07-13 bench cover test: 163 m teleports reached PX4 that
         # way). Healthy scenes on this rig run 24-110 landmarks.
         self.declare_parameter("min_landmarks_3d", 10)
+        # Landmark-count variance scaling. The cuVSLAM covariance and the
+        # empirical window scatter both react to pose noise that has ALREADY
+        # happened; the triangulated-landmark count drops first, while the
+        # pose still looks self-consistent. Inflating the reported variance by
+        # (100 / quality)^2 -- quality being the same landmark-scaled figure
+        # sent in VehicleOdometry.quality -- de-weights vision in EKF2 as the
+        # scene thins out, instead of holding nominal confidence right up to
+        # the min_landmarks_3d cliff where the pose is withheld entirely.
+        # Squared because variance is in m^2: a 2x-worse-constrained pose is
+        # 4x the variance. Scale is 1.0 at quality 100 (>=50 landmarks) and
+        # clamps at quality_variance_max_scale so a single bad frame cannot
+        # push vision to effectively-infinite variance.
+        self.declare_parameter("quality_variance_scaling", True)
+        self.declare_parameter("quality_variance_max_scale", 25.0)
 
         # -- IMU fusion (only used when enable_imu_fusion is true) --
         # Defaults are placeholders
@@ -394,6 +452,15 @@ class CuVslamPublisherNode(Node):
         self.declare_parameter("rig_from_imu_rotation_xyzw", [0.0, 0.0, 0.0, 1.0])
 
     def _load_params(self):
+        self._camera_type = (
+            str(self.get_parameter("camera_type").value).strip().lower()
+        )
+        if self._camera_type not in ("oak", "realsense"):
+            self.get_logger().warn(
+                f"Unknown camera_type '{self._camera_type}'; expected 'oak' or "
+                "'realsense'. Falling back to 'oak'."
+            )
+            self._camera_type = "oak"
         self._width = int(self.get_parameter("width").value)
         self._height = int(self.get_parameter("height").value)
         self._camera_fps = float(self.get_parameter("camera_fps").value)
@@ -449,6 +516,16 @@ class CuVslamPublisherNode(Node):
 
         self._left_border_mask = self._list_param("left_border_mask", 4, int)
         self._right_border_mask = self._list_param("right_border_mask", 4, int)
+
+        self._rs_emitter_enabled = bool(
+            self.get_parameter("realsense_emitter_enabled").value
+        )
+        self._rs_laser_power = float(self.get_parameter("realsense_laser_power").value)
+        self._rs_auto_exposure_limit_us = float(
+            self.get_parameter("realsense_auto_exposure_limit_us").value
+        )
+        self._rgb_width = int(self.get_parameter("rgb_width").value)
+        self._rgb_height = int(self.get_parameter("rgb_height").value)
 
         self._world_frame_id = str(self.get_parameter("world_frame_id").value)
         self._rig_frame_id = str(self.get_parameter("rig_frame_id").value)
@@ -527,6 +604,12 @@ class CuVslamPublisherNode(Node):
             self.get_parameter("reacquire_stable_frames").value
         )
         self._min_landmarks_3d = int(self.get_parameter("min_landmarks_3d").value)
+        self._quality_variance_scaling = bool(
+            self.get_parameter("quality_variance_scaling").value
+        )
+        self._quality_variance_max_scale = max(
+            1.0, float(self.get_parameter("quality_variance_max_scale").value)
+        )
         self._imu_extrinsics_source = (
             str(self.get_parameter("imu_extrinsics_source").value).strip().lower()
         )
@@ -568,20 +651,140 @@ class CuVslamPublisherNode(Node):
             self.get_logger().info(f"Using '{mounting}' camera mounting")
         return preset.copy()
 
-    # ---------- DepthAI + cuVSLAM pipeline ----------
+    # ---------- camera + cuVSLAM pipeline ----------
 
     def _pipeline_loop(self):
+        """Run the camera backend selected by `camera_type` on the worker."""
+        if self._camera_type == "realsense":
+            self._realsense_pipeline_loop()
+        else:
+            self._oak_pipeline_loop()
+
+    def _warm_up_gpu(self):
+        try:
+            # Pay the CUDA/cusolver init cost before frames start streaming
+            # instead of inside the first track() call, where it shows up as a
+            # slow track with frames dropping behind it.
+            vslam.warm_up_gpu()
+        except Exception as exc:
+            # Non-fatal here: if CUDA is truly broken, Tracker() below fails
+            # with a clearer error.
+            print(f"[cuvslam] warm_up_gpu failed: {exc!r}", flush=True)
+
+    # ---------- RealSense (D400-series) ----------
+
+    def _realsense_pipeline_loop(self):
+        source = None
+        try:
+            self._warm_up_gpu()
+            source = RealSenseSource(
+                serial=str(self.get_parameter("device_id").value or ""),
+                width=self._width,
+                height=self._height,
+                camera_fps=self._camera_fps,
+                rgb_fps=self._rgb_fps,
+                rgb_width=self._rgb_width,
+                rgb_height=self._rgb_height,
+                enable_rgb=self._publish_rgb,
+                emitter_enabled=self._rs_emitter_enabled,
+                laser_power=self._rs_laser_power,
+                auto_exposure_limit_us=self._rs_auto_exposure_limit_us,
+                logger=self.get_logger(),
+            )
+            source.open()
+
+            # The D435i's IMU is a separate HID device that does not enumerate
+            # on every kernel. Rather than start a tracker in Inertial mode
+            # that will never receive a measurement, degrade to stereo-only.
+            if not source.has_imu and (self._publish_imu or self._enable_imu_fusion):
+                self._publish_imu = False
+                self._enable_imu_fusion = False
+
+            if source.rectified and not self._rectified_stereo_camera:
+                self.get_logger().warn(
+                    "The RealSense infrared pair is rectified in hardware but "
+                    "rectified_stereo_camera is false; set it true to let "
+                    "cuVSLAM skip its own rectification"
+                )
+
+            print("[cuvslam] creating cuVSLAM tracker", flush=True)
+            tracker = self._create_tracker(
+                source.vslam_cameras(self._left_border_mask, self._right_border_mask)
+            )
+
+            self._camera_info_from_realsense(source)
+            self._warmup(source)
+
+            n_stereo = 0
+            n_rgb = 0
+            while not self._stop.is_set():
+                message_group = source.tryGet()
+                if message_group is not None:
+                    self._handle_stereo_group(tracker, message_group)
+                    n_stereo += 1
+
+                rgb_frame = source.poll_rgb()
+                if rgb_frame is not None:
+                    self._publish_rgb_frame(rgb_frame)
+                    n_rgb += 1
+
+                total = n_stereo + n_rgb
+                if total > 0 and total % 300 == 0:
+                    print(
+                        f"[cuvslam] counts: stereo={n_stereo} rgb={n_rgb}",
+                        flush=True,
+                    )
+
+                time.sleep(0.001)
+        except Exception as exc:
+            print(f"[cuvslam] pipeline EXCEPTION: {exc!r}", flush=True)
+            self.get_logger().error(f"cuVSLAM RealSense pipeline failed: {exc}")
+            self.pipeline_failed = True
+            # Wake the main thread out of rclpy.spin() so the process can exit
+            # non-zero rather than idling as a publisher of nothing.
+            rclpy.try_shutdown()
+        finally:
+            if source is not None:
+                source.close()
+
+    def _camera_info_from_realsense(self, source):
+        self._left_camera_info = self._realsense_camera_info(
+            source, "left", self._left_frame_id
+        )
+        self._right_camera_info = self._realsense_camera_info(
+            source, "right", self._right_frame_id
+        )
+        self._rgb_camera_info = self._realsense_camera_info(
+            source, "color", self._rig_frame_id
+        )
+
+    def _realsense_camera_info(self, source, which: str, frame_id: str):
+        values = source.camera_info_values(which)
+        if values is None:
+            return None
+        width, height, k, d, model = values
+        msg = CameraInfo()
+        msg.width = width
+        msg.height = height
+        msg.header.frame_id = frame_id
+        msg.distortion_model = model
+        msg.d = d
+        msg.k = k
+        msg.r = [1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0]
+        msg.p = [k[0], k[1], k[2], 0.0, k[3], k[4], k[5], 0.0, k[6], k[7], k[8], 0.0]
+        return msg
+
+    # ---------- OAK-D (DepthAI) ----------
+
+    def _oak_pipeline_loop(self):
         device = None
         try:
-            try:
-                # Pay the CUDA/cusolver init cost before frames start
-                # streaming instead of inside the first track() call, where
-                # it shows up as a slow track with frames dropping behind it.
-                vslam.warm_up_gpu()
-            except Exception as exc:
-                # Non-fatal here: if CUDA is truly broken, Tracker() below
-                # fails with a clearer error.
-                print(f"[cuvslam] warm_up_gpu failed: {exc!r}", flush=True)
+            if dai is None:
+                raise RuntimeError(
+                    "camera_type is 'oak' but depthai is not installed: "
+                    f"{DEPTHAI_IMPORT_ERROR}"
+                )
+            self._warm_up_gpu()
             device_id = str(self.get_parameter("device_id").value or "")
             if device_id:
                 print(f"[cuvslam] opening OAK-D device {device_id}", flush=True)
@@ -597,7 +800,14 @@ class CuVslamPublisherNode(Node):
             calibration = device.readCalibration()
 
             print("[cuvslam] creating cuVSLAM tracker", flush=True)
-            tracker = self._create_tracker(calibration)
+            tracker = self._create_tracker(
+                self._oak_vslam_cameras(calibration),
+                imu_calibration=(
+                    self._create_vslam_imu(calibration)
+                    if self._enable_imu_fusion
+                    else None
+                ),
+            )
 
             print("[cuvslam] creating DepthAI pipeline", flush=True)
             with dai.Pipeline(device) as pipeline:
@@ -640,6 +850,10 @@ class CuVslamPublisherNode(Node):
         except Exception as exc:
             print(f"[cuvslam] pipeline EXCEPTION: {exc!r}", flush=True)
             self.get_logger().error(f"cuVSLAM pipeline failed: {exc}")
+            self.pipeline_failed = True
+            # Wake the main thread out of rclpy.spin() so the process can exit
+            # non-zero rather than idling as a publisher of nothing.
+            rclpy.try_shutdown()
         finally:
             if device is not None:
                 try:
@@ -707,8 +921,9 @@ class CuVslamPublisherNode(Node):
         # inertial mode into dead-reckoning divergence. 600 packets ≈ 3 s.
         return imu.out.createOutputQueue(maxSize=600, blocking=False)
 
-    def _create_tracker(self, calibration):
-        cameras = [
+    def _oak_vslam_cameras(self, calibration) -> list:
+        """The OAK-D stereo rig, with CAM_A (color) as the rig origin."""
+        return [
             self._create_vslam_camera(
                 calibration,
                 dai.CameraBoardSocket.CAM_B,
@@ -723,9 +938,15 @@ class CuVslamPublisherNode(Node):
             ),
         ]
 
+    def _create_tracker(self, cameras: list, imu_calibration=None):
+        """Build the cuVSLAM tracker from a backend-supplied camera rig.
+
+        `cameras` and `imu_calibration` are the only camera-specific inputs,
+        so every engine setting below is shared by the OAK-D and RealSense
+        backends.
+        """
         rig = vslam.Rig(cameras)
         if self._enable_imu_fusion:
-            imu_calibration = self._create_vslam_imu(calibration)
             if imu_calibration is None:
                 self.get_logger().error(
                     "IMU fusion requested but no usable rig_from_imu extrinsics "
@@ -996,7 +1217,7 @@ class CuVslamPublisherNode(Node):
             and timestamp_ns <= self._last_cuvslam_timestamp_ns
         ):
             self.get_logger().warn(
-                "Dropping non-monotonic stereo frame timestamp from DepthAI"
+                "Dropping non-monotonic stereo frame timestamp from the camera"
             )
             return
 
@@ -1461,10 +1682,12 @@ class CuVslamPublisherNode(Node):
 
         It must be the capture time, not the publish time, so EKF2 fuses the
         pose against the vehicle state at exposure (EKF2_EV_DELAY then only
-        covers residual, unmodeled lag). DepthAI stamps frames in the host
-        steady clock while PX4 expects the ROS epoch domain (the uXRCE agent
-        timesyncs both timestamp fields), so bridge the domains by
-        subtracting the measured capture->publish latency from ROS time.
+        covers residual, unmodeled lag). Both backends stamp frames in the
+        host steady clock (DepthAI natively, RealSense via its global-time
+        epoch stamps rebased onto the monotonic clock) while PX4 expects the
+        ROS epoch domain (the uXRCE agent timesyncs both timestamp fields),
+        so bridge the domains by subtracting the measured capture->publish
+        latency from ROS time.
         Falls back to the publish time when the host-clock capture time is
         missing or implies an implausible (>500 ms or negative) latency.
         """
@@ -1570,7 +1793,33 @@ class CuVslamPublisherNode(Node):
                 ori_var, np.diag(R_body_world @ cov_rot_world @ R_body_world.T)
             )
 
+        # Inflate by scene quality last, so it compounds with whichever of the
+        # floor / empirical / tracker covariance won above rather than being
+        # masked by a np.maximum against them.
+        scale = self._quality_variance_scale()
+        if scale > 1.0:
+            pos_var = pos_var * scale
+            ori_var = ori_var * scale
+
         return pos_var.astype(np.float32), ori_var.astype(np.float32)
+
+    def _quality_variance_scale(self) -> float:
+        """Variance multiplier from the current landmark-scaled quality.
+
+        (100 / quality)^2, clamped to [1, quality_variance_max_scale]. Returns
+        1.0 (no inflation) when scaling is disabled or the landmark count is
+        unavailable, matching _px4_quality's no-information fallback of 100.
+        """
+        if not self._quality_variance_scaling:
+            return 1.0
+        if self._last_landmarks_3d is None:
+            return 1.0
+        quality = self._px4_quality()
+        if quality >= 100:
+            return 1.0
+        return float(
+            np.clip((100.0 / quality) ** 2, 1.0, self._quality_variance_max_scale)
+        )
 
     def _feature_color(self, track_id: int) -> tuple[int, int, int]:
         """Return a stable BGR color for a feature track id."""
@@ -1726,16 +1975,16 @@ class CuVslamPublisherNode(Node):
         return self.get_clock().now().to_msg()
 
     def destroy_node(self):
-        # Ask the DepthAI worker to stop and give it time to tear the pipeline
+        # Ask the camera worker to stop and give it time to tear the pipeline
         # and device down cleanly. It is a daemon thread, so if we returned
         # while it was still mid-call the interpreter would kill it during a
-        # native DepthAI call and the C++ runtime would abort().
+        # native DepthAI/librealsense call and the C++ runtime would abort().
         self._stop.set()
         if self._worker.is_alive():
             self._worker.join(timeout=10.0)
             if self._worker.is_alive():
                 self.get_logger().warn(
-                    "DepthAI worker did not stop within 10s; shutting down anyway"
+                    "Camera worker did not stop within 10s; shutting down anyway"
                 )
         super().destroy_node()
 
@@ -1751,11 +2000,17 @@ def main(args=None, publish_px4: bool = False):
         # down. Fall through to clean up the node and shut down idempotently.
         pass
     finally:
+        pipeline_failed = node is not None and node.pipeline_failed
         if node is not None:
             node.destroy_node()
         # try_shutdown() is a no-op if the context is already shut down, so it
         # never raises "rcl_shutdown already called" the way shutdown() does.
         rclpy.try_shutdown()
+        if pipeline_failed:
+            # Non-zero so systemd's Restart=on-failure fires. Combined with
+            # StartLimitIntervalSec=0 in vio.service this retries forever,
+            # which is what a drone waiting on a slow-enumerating D435i needs.
+            sys.exit(1)
 
 
 if __name__ == "__main__":
