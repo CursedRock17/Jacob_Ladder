@@ -1,187 +1,49 @@
-# External Modes
-------------------
-This project takes advantage of External Modes for any and all autonomous control. External modes allow our drone to have autonomously functionality at the switch of a button on the safety handset and can be engaged ahead of time. They are the standard interface for working with autonomous algorithms through the ROS 2 / PX4 Stack that this drone uses.
-External modes are created with the [PX4 ROS2 Interface Library](https://github.com/Auterion/px4-ros2-interface-lib), and 
-utilize ROS 2 nodes to interact with PX4 setpoints. 
-External modes are a superior alternative to `offboard` mode that many people are familiar with.
+# External modes
 
-Fantastic [video](https://www.youtube.com/watch?v=3zRCIsq_MCE) w/more information
+PX4 external modes are flight modes implemented on a companion computer with ROS 2. They register with PX4 and appear alongside built-in modes in QGroundControl. Use one when the mission needs custom continuous control, such as following a target, while still letting PX4 manage mode selection, arming checks, and configured failsafes. The [PX4 ROS 2 Control Interface guide](https://docs.px4.io/v1.16/en/ros2/px4_ros2_control_interface) describes the registration and mode requirements.
 
-#### Benefits
-1) They don't require MAVLink
-2) There's no limit to number of setpoint types
-3) More general integration with ROS 2, extended controls and increasing features
-4) You can use multiple applications to control the vehicle
+An external **mode** sends setpoints while selected. An optional **mode executor** sequences operations around it: arm, PX4-native takeoff, schedule the mode, land or RTL, and wait for disarm. The executor is useful when a mission should do more than hold or track after the pilot selects a mode. For a working example of both classes, start with [`example_autonomous_mode`](../src/example_autonomous_mode/README.md). [`precision_land/BlankMode.cpp`](../src/precision_land/BlankMode.cpp) is a smaller example without an executor; it expects the pilot to arm and select the mode separately.
 
-#### Caveats
-You have to match the message type between PX4 ([uORB](https://docs.px4.io/main/en/middleware/uorb)) and ROS 2 [interfaces](https://docs.ros.org/en/humble/Concepts/Basic/About-Interfaces.html), this
-can be subverted by running the message [translation node](https://docs.px4.io/main/en/ros2/px4_ros2_msg_translation_node) :
-```shell
-ros2 run translation_node translation_node_bin
-```
-which is how we handle
-it in this project. In your custom mode constructor simply add the following line:
-```Cpp
-setSkipMessageCompatibilityCheck();
+```mermaid
+flowchart LR
+    Operator[Operator selects registered mode] --> Executor[Mode executor]
+    Executor -->|arm and native takeoff| PX4[PX4]
+    Executor -->|schedule| Mode[External mode]
+    Mode -->|continuous setpoints| PX4
+    Mode -->|success or interruption| Executor
+    Executor -->|native land or RTL| PX4
 ```
 
-### File Structure
-As per usual C++ guidelines we're going to split our autonomous set up into a header (`.hpp`) file and source (`.cpp`) file. The mode and executor can live in the same file, therefore for some autonomous behavior you should only end up with two files.
+The mode needs a supported `px4_ros2` setpoint type, a unique registered name, and appropriate position or other vehicle inputs. Our example uses `OdometryLocalPosition` and `TrajectorySetpointType`. A mode can be selected by the operator, by another PX4 mechanism, or by its executor; registering the node alone does not start a mission. The [example state diagram](../src/example_autonomous_mode/README.md#how-the-pieces-fit) shows the split in a real workflow.
 
-#### Header File Essentials
-While each header file may contain different packages and naming practices, they'll generally all have the same things in them:
-**Packages + Header Guard**:
-Include our header guard and necessaary packages to actually run our setup:
-```cpp
-#pragma once
+## Registration and message versions
 
-#include "StatePublisher.hpp"
+The registered name is serialized into [`RegisterExtComponentRequest.name`](../src/px4_msgs/msg/RegisterExtComponentRequest.msg), a `char[25]` field. The [registration implementation](../src/px4-ros2-interface-lib/px4_ros2_cpp/src/components/registration.cpp) rejects a name of 25 or more characters, leaving 24 usable characters. Keep it unique across modes connected to the autopilot. PX4 uses a hash of the name to preserve an external mode's switch index across startup-order changes; see [Assigning a Mode to an RC Switch](https://docs.px4.io/v1.16/en/ros2/px4_ros2_control_interface#assigning-a-mode-to-an-rc-switch-or-joystick-action).
 
-#include <px4_ros2/components/mode.hpp>
-#include <px4_ros2/components/mode_executor.hpp>
-#include <px4_ros2/control/setpoint_types/experimental/trajectory.hpp>
-#include <px4_ros2/odometry/local_position.hpp>
+PX4 firmware, `px4_msgs`, and the interface library must agree on message definitions. This workspace uses the [PX4 message translation node](https://docs.px4.io/main/en/ros2/px4_ros2_msg_translation_node). For this checkout, call `setSkipMessageCompatibilityCheck()` in **both** the mode and executor constructors; the version check otherwise rejects registration. Skipping that check does not itself translate messages. Start the translation node as described in the [workspace setup](../README.md), and keep the message versions pinned to the versions used by this project.
 
-#include <rclcpp/rclcpp.hpp>
-#include <px4_msgs/msg/vehicle_local_position.hpp>
+## Setpoints and failsafes
 
-#include <Eigen/Core>
+The selected mode must keep publishing the setpoints required by its active control type. The interface library requests a timer rate from the setpoint type; its default is 50 Hz, while `updateSetpoint(float dt_s)` receives the measured interval and is not guaranteed to run on an exact 20 ms schedule. Use `dt_s` for motion integration. [PX4's setpoint configuration](https://docs.px4.io/main/en/msg_docs/SetpointConfig) has a setpoint timeout; the registration and arming-check path also detects unresponsive modes. This is different from ROS 2 Offboard mode's `OffboardControlMode` proof-of-life stream.
 
-#include <string>
-```
+If the active external mode crashes, stops responding, loses a required position estimate, or stops supplying setpoints, PX4 may enter its configured failsafe. The action depends on the aircraft's safety settings; it is not always an immediate disarm. A landing detector topic is not required to keep a mode alive. The example subscribes to `VehicleLandDetected` only to locate the ground for its optional controlled descent, then lets PX4's native landing handle touchdown and disarm. See [PX4 mode requirements and failsafes](https://docs.px4.io/v1.17/en/ros2/px4_ros2_control_interface#failsafes-and-mode-requirements).
 
-**Naming**:
-Each autonomous mode should use a namespace to differentiate its information from other packages. It should also use a precise name which gets serialized in QGC to correctly identify the mode you're launching each and everytime. All further mode **must** live inside of the namespace
-```cpp
-namespace simple_external {
-inline constexpr char kSimpleExternalModeName[] = "SimpleExternal";
-inline constexpr bool kSimpleExternalDebugOutput = true;
+## Finding the registered mode in QGroundControl
 
-// ... More Modes + Executors
-}
-```
+1. Launch the node and wait for successful registration.
+2. Open QGroundControl's **MAVLink Console** and run `commander status`.
+3. Find `External Mode N: nav_state: ..., name: ...` and match its name and number to the external-mode entry in the flight-mode selector or switch assignment.
 
-### Executors
-Executors handle the overall state machine for the drone. They also register certain modes (states) at any given
-time, based on any set structure of conditions. It splits the whole workflow into 2 and allows a better molding of your autonomous setup
+![Illustration of commander status and the matching QGroundControl mode entry](../src/example_autonomous_mode/assets/qgc-mode-selection.svg)
 
+The sketch is illustrative rather than a screenshot from a connected aircraft. If the entry is missing, check node registration, PX4/DDS connectivity, message translation, and the name length. If it appears but cannot be selected, inspect mode requirements and PX4 status messages.
 
-**Executor Header File**:
+PX4 local position uses the North-East-Down frame:
 
+![NED axes showing north, east, and positive-down directions](../src/example_autonomous_mode/assets/NED.excalidraw.svg)
 
+Positive z points down, so climbing makes z smaller and a positive z velocity commands descent. Check the requested frame and units whenever you add a new setpoint type.
 
-### Modes
-A Component that sends setpoints (one or more) and can perform a number of tasks
-agnostic to just flying (i.e. check battery state, view local position, etc.)
+## Adding a mode to this workspace
 
-The following is a super simple mode that can change states and registers itself
-The full code is in the "src/jacob_manual/SimpleExternal.cpp", you can build this 
-"template" out to fit your ideal mission.
-
-*Note*, the `SimpleExternalMode` class present won't run anything useful, but will create a mode that PX4/QGC will be able to recognize. The class serves as a shell for the necessary functions users will need.
-
-**Mode Header File**:
-
-
-**Simple Constructor**:
-We first need to create a simple constructor which will inherit the necessary parameters from the `ModeBase` and ROS 2 `Node` classes. We'll standardize our node, create settings, allow our messages to be bridged between PX4 and ROS 2, and declare any and all parameters necessary for the drone. [Parameters](https://docs.ros.org/en/foxy/Tutorials/Beginner-CLI-Tools/Understanding-ROS2-Parameters/Understanding-ROS2-Parameters.html) are essentially easy to control variables in the ROS ecosystem. 
-```cpp
-SimpleExternalMode::SimpleExternalMode(rclcpp::Node& node)
-	: ModeBase(node, ModeBase::Settings{kSimpleExternalModeName})
-	, _node(node)
-{
-  // Since we're using the translation node, we can skip message compatibility and PX4 will convert for us
-	setSkipMessageCompatibilityCheck();
-
-  // We want access to the estimated vehicle position along with the ability to go to certain setpoints
-	_vehicle_local_position = std::make_shared<px4_ros2::OdometryLocalPosition>(*this);
-	_trajectory_setpoint = std::make_shared<px4_ros2::TrajectorySetpointType>(*this);
-
-  // Grab any and all parameters ROS will show available to us
-	loadParameters();
-}
-```
-**Load Parameters**:
-We have the ability to load parameters at compile time from our ROS 2 parameters list.
-This can feature as many parameters as you want to change at any given time, just declare and
-grab each of the parameters you want.
-```cpp
-void SimpleExternalMode::loadParameters()
-{
-  // Declare any ROS 2 parameter for the network and grab any value present
-	_node.declare_parameter<float>("some_param_height", 0.1f);
-
-	_node.get_parameter("some_param_height", _some_param_height;
-}
-```
-
-**Activation Functions**:
-Next, we neeed some standard functions. One for when the external mode is switched on, 
-the other, when the external mode is switched off.
-```cpp
-void SimpleExternalMode::onActivate()
-{
-  // Ensure we have a valid starting state
-  switchToState(State::Idle)
-	RCLCPP_INFO(_node.get_logger(), "External Mode Activated")
-}
-
-void SimpleExternalMode::onDeactivate()
-{
-  // We can go back to idle when all finished
-	switchToState(State::Idle);
-	RCLCPP_INFO(_node.get_logger(), "External Mode Deactivated")
-}
-```
-
-**State Machine**:
-This is the guts of the External Mode. You'll put everything into an `updateSetpoint` function which will run once in every portion of the control loop. The
-state machine that you'll use will determine what behaviors the drone will exhibit (takeoff, landing, searching, hovering, need to recharge, anything). This is where autonomous code will have to be placed when utilizing the drone.
-```cpp
-void SimpleExternalMode::updateSetpoint(float dt_s)
-{
-  if (!_active) return;
-
-  _state_elapsed += dt_s;
-
-  switch (_state) {
-    case SimpleState::SimpleStart: {
-      // First State Logic would go here
-      RCLCPP_INFO(_node.get_logger(), "Hello World!");
-	}
-	break;
-  }
-
-}
-```
-
-### Linking into the project
-Since we're using `cpp` in our colcon project, we'll use a `CMakeLists.txt` file in each folder. Therefore, when you finish your mode+executor pair, be sure to upload into that CMake file. There should be 4 references to the name of your mode in that file. First, make sure you any packages you desire after basic cmake setup, this will be towards the top, simply add addition external packages with:
-```cpp
-find_package(some_package REQUIRED)
-```
-
-Then, we need to add an executable to make this easy to launch, label your desired file and add in the source file. We'll also need to link dependencies and add compilation features:
-```cpp
-add_executable(simple_external SimpleExternal.cpp)
-ament_target_dependencies(simple_external rclcpp Eigen3 px4_ros2_cpp std_msgs)
-target_compile_features(simple_external PUBLIC c_std_99 cxx_std_17)
-```
-
-Finally, make sure to install our executables in the installation section:
-```cpp
-install(TARGETS
-  simple_external
-  DESTINATION lib/${PROJECT_NAME}
-)
-```
-
-### Create Your Own Autonomous Mode (Template)
-We've provided an example node in the [precision_land](https://github.com/CursedRock17/Jacob_Ladder/tree/main/src/precision_land) directory which will autonomously takeoff, run some autonomous code that you HAVE to fill in, then land. This is a good stub for you if didn't quite understand what was just said and allows an easier time in running autonomous modes in PX4.
-
-#### Ensuring Mode is saved
-In the MAVLink Console run:
-```bash
-commander status
-```
-The result of the of External Mode channel should show up
+Copy the two example C++ files into an existing ROS 2 package, rename the classes and registered mode name, and add the source file and dependencies to that package's `CMakeLists.txt`. Copy the example's YAML and launch file if you want its parameter and launch structure. The [step-by-step example instructions](../src/example_autonomous_mode/README.md#using-the-classes-in-another-package) cover the names, state transitions, and build entries. Keep debug topics such as `/drone_state` and `/tracking_error` if useful; they are optional and are not part of PX4 mode registration.

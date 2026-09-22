@@ -4,16 +4,14 @@
  * This is the reference example for writing a new autonomous mode. It is
  * deliberately the simplest thing that still flies end to end:
  *
- *   1. The executor arms and uses PX4's native takeoff to reach a low
- *      "optical flow" height
- *   2. The mode pauses there so the flow sensor can lock, then holds position
- *   3. The mode descends at a controlled rate before the executor hands final
- *      touchdown and disarming back to PX4
+ *   1. The executor arms and uses PX4's native takeoff
+ *   2. The mode holds the reached position
+ *   3. With a ground reference, the mode descends to a handoff height; the
+ *      executor then asks PX4 to land and waits for disarm
  *
  * It registers as a custom PX4 flight mode via the px4_ros2 library, which
  * means it appears in QGroundControl next to the built-in modes. Copy this
- * package as the starting point for a new mode — see README.md for the parts
- * you will want to change first.
+ * mode and executor classes as the starting point for a new mode — see README.md.
  */
 #pragma once
 
@@ -24,7 +22,6 @@
 
 #include <geometry_msgs/msg/vector3_stamped.hpp>
 #include <px4_msgs/msg/vehicle_land_detected.hpp>
-#include <px4_msgs/msg/vehicle_local_position.hpp>
 #include <rclcpp/rclcpp.hpp>
 #include <std_msgs/msg/string.hpp>
 
@@ -59,7 +56,6 @@ namespace example_autonomous_mode
     enum class State
     {
       Idle,                // Not doing anything
-      OpticalFlowSettling, // Low hover while optical flow / VIO odometry settles
       Holding,             // Hovering in place for a set duration
       Descending,          // Controlled descent to the native-landing handoff
       Finished             // Report success to the executor
@@ -77,9 +73,12 @@ namespace example_autonomous_mode
 
     rclcpp::Node &_node;
 
-    // Subscription to know when the drone has physically touched down
+    // Optional preflight ground reference and descent stop signal
     rclcpp::Subscription<px4_msgs::msg::VehicleLandDetected>::SharedPtr
         _vehicle_land_detected_sub;
+    rclcpp::Publisher<std_msgs::msg::String>::SharedPtr _drone_state_pub;
+    rclcpp::Publisher<geometry_msgs::msg::Vector3Stamped>::SharedPtr
+        _tracking_error_pub;
 
     // PX4 ROS 2 interface objects for reading position and sending commands
     std::shared_ptr<px4_ros2::OdometryLocalPosition> _vehicle_local_position;
@@ -87,20 +86,15 @@ namespace example_autonomous_mode
 
     // State machine tracking
     State _state = State::Idle;
-    Eigen::Vector3f _base_position{
-        Eigen::Vector3f::Zero()}; // Where the drone started (NED)
     Eigen::Vector3f _hold_position{
         Eigen::Vector3f::Zero()}; // Current commanded position
     bool _land_detected = false;
     bool _ground_z_valid = false;
     float _state_elapsed = 0.0f; // Time spent in the current state (seconds)
-    float _ground_z = 0.0f;      // Observed or, as a fallback, inferred ground plane
+    float _ground_z = 0.0f;      // Ground plane observed while landed
 
     // Tunable parameters — defaults here are only a fallback; the real values
     // come from cfg/example_autonomous_mode_params.yaml via the launch file
-    float _optical_flow_height = 0.25f;   // Height for optical flow init (m)
-    float _optical_flow_hold_time = 3.0f; // Hover time at flow height (s)
-    float _delta_position = 0.05f;        // Executor takeoff completion tolerance (m)
     float _hold_duration = 7.5f;          // How long to hold at altitude (s)
     float _descent_vel = 0.5f;            // Vertical speed during descent (m/s)
     float _landing_height = 0.10f;        // Native-landing handoff height AGL (m)
@@ -114,7 +108,7 @@ namespace example_autonomous_mode
     enum class State
     {
       Arming,           // Arm the vehicle
-      TakingOff,        // PX4-native takeoff to optical_flow_height
+      TakingOff,        // PX4-native takeoff to its configured altitude
       RunningMode,      // Schedule the external setpoint mode
       Landing,          // PX4-native final touchdown
       WaitingForDisarm, // Wait for PX4 to report the vehicle disarmed
@@ -127,21 +121,6 @@ namespace example_autonomous_mode
     void runState(State state, px4_ros2::Result result);
 
     rclcpp::Node &_node;
-
-    // takeoff() completion is detected two ways because its callback does not
-    // fire reliably below MIS_TAKEOFF_ALT: this local-position watcher, and the
-    // callback itself. Whichever arrives first wins, guarded by
-    // _takeoff_complete.
-    rclcpp::Subscription<px4_msgs::msg::VehicleLocalPosition>::SharedPtr
-        _local_pos_sub;
-
-    float _optical_flow_height = 0.25f;
-    float _delta_position = 0.05f;
-    float _takeoff_target_z = -0.20f;
-    float _latest_local_z = 0.0f;
-    bool _have_local_position = false;
-    bool _in_takeoff = false;
-    bool _takeoff_complete = false;
   };
 
 } // namespace example_autonomous_mode

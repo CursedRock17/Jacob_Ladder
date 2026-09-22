@@ -19,7 +19,7 @@ find_package(geometry_msgs REQUIRED)
 
 include_directories(${Eigen3_INCLUDE_DIRS})
 
-# Minimal executor workflow plus external mode: takeoff, settle, hold, and land
+# Minimal executor workflow plus external mode: takeoff, hold, and land
 add_executable(example_autonomous_mode
   ExampleAutonomousMode.cpp
 )
