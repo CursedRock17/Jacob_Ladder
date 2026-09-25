@@ -1,5 +1,8 @@
 #pragma once
 
+#include "StatePublisher.hpp"
+#include "TrackingErrorPublisher.hpp"
+
 #include <px4_ros2/components/mode.hpp>
 #include <px4_ros2/components/mode_executor.hpp>
 #include <px4_ros2/odometry/local_position.hpp>
@@ -69,6 +72,8 @@ private:
 
 	// ros2
 	rclcpp::Node& _node;
+	StatePublisher _state_pub;
+	TrackingErrorPublisher _tracking_error;
 	rclcpp::Subscription<geometry_msgs::msg::PoseStamped>::SharedPtr _target_pose_sub;
 	rclcpp::Subscription<px4_msgs::msg::VehicleLandDetected>::SharedPtr _vehicle_land_detected_sub;
 

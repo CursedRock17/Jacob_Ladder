@@ -1,0 +1,10 @@
+# This package is formatted with clang-format, not the astyle setup the older
+# packages use (see the `format` target in the repository Makefile). The two
+# styles disagree about braces and indentation, so keeping this file here scopes
+# clang-format to this package and stops the two tools fighting over it.
+#
+#   clang-format -i src/jl_mission/src/*.cpp src/jl_mission/include/jl_mission/*.hpp src/jl_mission/test/*.cpp
+---
+BasedOnStyle: LLVM
+IndentWidth: 2
+ColumnLimit: 80

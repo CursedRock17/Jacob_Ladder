@@ -15,6 +15,8 @@ dependencies = [
     # oak_d_visual_odometry). Ships an aarch64/cp310 manylinux wheel with
     # librealsense bundled, so no apt/source build is needed on JetPack.
     "pyrealsense2",
+    "pytest",
+    "pyyaml",
     "rerun-sdk",
     "ruff",
     "scipy",
@@ -108,6 +110,7 @@ extra-paths = [
     "src/drogue_flight",
     "src/ros2_yolo_image_processing",
     "packages/jetson_cudss_bootstrap",
+    "src/jl_blocks",
 ]
 
 [tool.ty.src]

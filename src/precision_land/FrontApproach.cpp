@@ -12,6 +12,8 @@ namespace precision_land
 FrontApproach::FrontApproach(rclcpp::Node& node)
 	: ModeBase(node, ModeBase::Settings{kFrontApproachModeName, false})
 	, _node(node)
+	, _state_pub(node)
+	, _tracking_error(node)
 {
 	setSkipMessageCompatibilityCheck();
 
@@ -141,6 +143,7 @@ void FrontApproach::updateSetpoint(float dt_s)
 			_vehicle_local_position->positionNed().z());
 		Eigen::Vector3f hold = _vehicle_local_position->positionNed();
 		_trajectory_setpoint->updatePosition(hold);
+		_tracking_error.publish(hold, _vehicle_local_position->positionNed());
 
 		if (_front_tag.valid() && !target_lost) {
 			switchToState(State::Approach);
@@ -227,6 +230,7 @@ void FrontApproach::updateSetpoint(float dt_s)
 	case State::Finished: {
 		Eigen::Vector3f hold = _vehicle_local_position->positionNed();
 		_trajectory_setpoint->updatePosition(hold);
+		_tracking_error.publish(hold, _vehicle_local_position->positionNed());
 		ModeBase::completed(px4_ros2::Result::Success);
 		break;
 	}
@@ -285,6 +289,8 @@ void FrontApproach::resetController()
 
 void FrontApproach::switchToState(State state)
 {
+	_state_pub.set(stateName(state));
+
 	if (_state == state) {
 		return;
 	}

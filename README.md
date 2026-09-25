@@ -153,7 +153,7 @@ START HERE:
 | [aruco_tracker](src/aruco_tracker) | ROS 2 Wrapper for OpenCV detection of an ArUco Marker |
 | [drogue_flight](src/drogue_flight) | TODO: In-Progress Porting for flying to a detected KC-130 drogue |
 | [example_autonomous_mode](src/example_autonomous_mode) | **Start here to write a new mode** -> A minimal, working External Mode (take off, hold, land) documented line by line and meant to be copied |
-| [jacob_manual](src/jacob_manual)  | ROS 2 External Modes that Require Manual Control to get in the air, but fly autonomous missions after |
+| [jl_mission](src/jl_mission) | The one C++ external mode behind every mission file: checks and relays the Python mission runner's setpoints, owns arm/takeoff/land. Checked in SITL with `make sitl-test` |
 | [precision_land](src/precision_land)  | ROS 2 External Modes that fly autonomous missions for object detection, trajectory planning, and landing
 | [oak_d_visual_odometry](src/oak_d_visual_odometry)  | ROS 2 nodes for OAK-D visual odometry using NVIDIA cuVSLAM, with optional PX4 `VehicleOdometry` output for flight. |
 | [px4-ros2-interface-lib](src/px4-ros2-interface-lib) | Should NOT be Altered : Use Given Branch -> ROS 2 <-> PX4 Bridge, allows us to create External Modes |
@@ -168,6 +168,37 @@ Not a ROS 2 package, but it runs on the vehicle:
 |---|---|
 | [battery_monitor](battery_monitor) | Watches pack voltage on the INA238 and alerts at configurable land / min thresholds. Runs as a systemd service, independent of ROS 2. |
 
+## Deploying a mission
+
+On the drone (over its hotspot):
+
+1. Add the mission file to `config/flight.yaml` (it must live in `missions/`), commit, push.
+2. On the Jetson: `./deploy.sh`. It refuses while armed or with local changes,
+   pulls, checks every mission, builds the required packages, enables one
+   `jl_mission@<file>` service per mission, and ends with the readiness report.
+3. Before each flight: `./deploy.sh --check`.
+
+```text
+✓ DDS agent session established    dds_agent journal
+✓ FC data arriving                 /fmu/out/vehicle_status_v1
+✓ VIO publishing                   /fmu/in/vehicle_visual_odometry  30 Hz
+✓ Registered in PX4                TakeoffHoldLand
+```
+
+Deployment stops and disables removed mission instances and unlisted helpers
+(`vio`, `aruco_tracker`, `battery_monitor`); it leaves `dds_agent`,
+`translation_node`, and `takeoff_hold` alone.
+If the arm state cannot be read, deployment refuses unless you pass
+`--force-unknown-arm-state`; that flag never overrides a known armed state.
+
+Preview the commands for your local configuration with `./deploy.sh --dry-run`,
+which works without ROS or systemd and does not pull, build, or change services
+(Python with PyYAML is required).
+The preview lists how old instances would be discovered; it does not inspect
+the drone's installed services or verify readiness.
+Try the mission in SITL with
+`make sitl-mission MISSION=missions/takeoff_hold_land.yaml ARGS='--expect "takeoff hold land" --finished'`.
+
 ## What Can It Do?
 
 | Capability | Description |
@@ -179,6 +210,17 @@ Not a ROS 2 package, but it runs on the vehicle:
 | **GPS-Denied Flight (VIO)** | Estimate position indoors with an OAK-D stereo camera and NVIDIA cuVSLAM, fed to PX4's EKF2 as external vision — see [oak_d_visual_odometry](src/oak_d_visual_odometry) |
 | **Takeoff & Hold** | Simple building-block modes for taking off, holding altitude, and landing |
 | **Battery Voltage Alerting** | Watch the pack on the INA238 and warn — desktop popup, terminal broadcast — at your configured land and minimum voltages, before a pack gets over-drained. See [battery_monitor](battery_monitor) |
+
+### See it fly
+
+Recorded in Gazebo SITL. Each GIF shows the simulator on the left and what the drone's
+camera sees, as `aruco_tracker` annotates it, on the right. Click through for how each mode works.
+
+| [Front approach](src/precision_land/docs/FrontApproach.md) | [Precision landing](src/precision_land/docs/PrecisionLand.md) |
+|---|---|
+| ![FrontApproach](src/precision_land/docs/media/front_approach.gif) | ![PrecisionLand](src/precision_land/docs/media/precision_land.gif) |
+| [**Front approach, then land**](src/precision_land/docs/FrontToPrecisionLand.md) | [**Tag tracking with `DroneSmoothPlanner`**](src/drogue_flight/docs/aruco_sitl.md) |
+| ![FrontToPrecisionLand](src/precision_land/docs/media/front_to_precision_land.gif) | ![DroneSmoothPlanner](src/drogue_flight/docs/media/smooth_planner_aruco_sitl.gif) |
 
 ## If You're New to ROS 2
 
@@ -272,8 +314,8 @@ to `ModeExecutorBase`.
 Upstream only provides that method on `ModeBase`, where it is `protected` — and
 `ModeExecutorBase`'s `friend` relationship with `ModeBase` is not inherited by
 derived classes, so no executor subclass can reach it. Several of our mode
-executors call it, so without the fork `precision_land`, `drogue_flight` and
-`jacob_manual` fail to compile with:
+executors call it, so without the fork `precision_land` and `drogue_flight` fail to
+compile with:
 
 ```
 error: 'setSkipMessageCompatibilityCheck' was not declared in this scope
@@ -353,6 +395,9 @@ you may have to make `-e` and `-v` alterations to the the windowing and display 
 
 Replace `/path/to` with your actual path to Jacob_Ladder, and `$CONTAINER_NAME` with whatever you'd like.
 
+On Linux, `./docker/run_sim_container.sh` does all of this for you. It creates `jacob_ladder_sim` with the
+workspace and PX4 mounted at their host paths, your display and GPU passed through, and files owned by your user.
+
 If you're not already in the container, start and enter
 ```bash
 docker start $CONTAINER_NAME
@@ -389,12 +434,12 @@ Select the precision landing mode from the QGroundControl dropdown:
 |---|---|---|---|
 | `precision_land.sh` | `precision_land/front_to_precision_land.launch.py` | `gz_x500_dual_cam_aruco_dual_ids` | Front-camera approach, then downward precision landing on an ArUco tag |
 | `approach_aruco.sh` | `precision_land/front_approach.launch.py` | `gz_x500_dual_cam_aruco_dual_ids` | Front-camera ArUco tag approach only (no landing) |
-| `jacob_manual.sh` | `jacob_manual/front_approach.launch.py` | `gz_x500_dual_cam_aruco_dual_ids` | Same as `approach_aruco.sh`, but runs the newer `jacob_manual` package version |
 | `takeoff_hover.sh` | `precision_land/takeoff_hold.launch.py` | `gz_x500_dual_cam` | Takeoff and hold indefinitely — good for hover tuning |
 | `takeoff_hover_land.sh` | `precision_land/takeoff_land.launch.py` | `gz_x500_dual_cam` | Takeoff, hold briefly, then land — simplest end-to-end mode |
 | `offboard_blank.sh` | `precision_land/blank_mode.launch.py` | `gz_x500_dual_cam` | Empty external-mode template — registers with PX4 and does nothing, for when you already know the framework |
 | `moving_launch.sh` | `precision_land/track_follow.launch.py` | Custom moving platform world | Track and land on a moving ArUco platform (uses the `v1_16_tracker` aruco launch) |
 | `real_launch.sh` | *(edit before use)* | Real hardware | DDS agent + RViz shell for Jetson/Pixhawk flight testing — all mode commands are commented out so you can uncomment the one you want |
+| `aruco_smooth_planner.sh` | `drogue_flight/autonomous_smooth_flight.launch.py` | `aruco_dual_ids` (loaded from `gazebo/`) | `DroneSmoothPlanner` chasing an ArUco tag in place of the drogue. Uses the `jacob_ladder_sim` container, see [the walkthrough](src/drogue_flight/docs/aruco_sitl.md) |
 | `fake_drogue.sh` | *(no flight mode)* | Real hardware | Drogue camera feed sanity check — runs the DDS agent and `ros2 topic hz` on the camera topic |
 
 Writing a new mode rather than running an existing one? Start from
@@ -447,6 +492,12 @@ Also, all of the code in the repository can be totalled expanded.
 ### Flight Parameters
 Different configurations of physical drones may require different PX4 Parameter configurations
 any and all tested forms of parameters are labelled in the [`config/params`](config/params) directory.
+
+### Checking your work
+`make check` lints, type-checks and unit-tests the mission blocks in
+[`src/jl_blocks`](src/jl_blocks), and checks every mission file in `missions/`.
+It needs only [uv](https://docs.astral.sh/uv/) (no ROS), takes a few seconds, and
+runs automatically on every push through GitHub Actions.
 
 ### Before You Fly
 

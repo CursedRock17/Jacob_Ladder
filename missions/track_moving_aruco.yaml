@@ -1,0 +1,18 @@
+# Spec section 4's example: find an ArUco tag with the front camera and keep
+# 2 m in front of it. The tag id and size are aruco_tracker's own parameters.
+name: TrackMovingAruco
+target:
+  aruco_tag: {camera: front}
+controller:
+  pid: {kp: 0.8, ki: 0.0, kd: 0.2, max_speed: 1.0}
+
+steps:
+  - takeoff: {height: 1.5}
+  - search: {pattern: hold}
+    until: target_seen
+    timeout: 30
+    on_fail: land
+  - track: {standoff: 2.0}
+    until: never
+    on_fail: search
+  - land: {}

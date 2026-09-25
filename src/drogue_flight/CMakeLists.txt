@@ -29,6 +29,12 @@ install(TARGETS
   DESTINATION lib/${PROJECT_NAME}
 )
 
+# SITL only: republishes ArUco detections as /tag_detections for the planner
+install(PROGRAMS
+  drogue_flight/aruco_to_ranging.py
+  DESTINATION lib/${PROJECT_NAME}
+)
+
 if(BUILD_TESTING)
     find_package(ament_lint_auto REQUIRED)
     ament_lint_auto_find_test_dependencies()

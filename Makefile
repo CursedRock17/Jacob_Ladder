@@ -41,4 +41,45 @@ clean:
 	@rm -rf build install log
 	@echo "All build artifacts removed"
 
-.PHONY: all format build clean
+# Lint, type-check and unit-test the mission blocks (no ROS needed). The tools
+# are pinned and installed once into .check-venv, so the same versions run here
+# and in CI (.github/workflows/check.yml). uv must be installed.
+CHECK_VENV := .check-venv
+CHECK_BIN := $(CHECK_VENV)/bin
+JL_BLOCKS := src/jl_blocks
+MISSIONS := $(wildcard missions/*.yaml)
+
+$(CHECK_BIN)/pytest:
+	uv venv --python 3.10 $(CHECK_VENV)
+	uv pip install --python $(CHECK_VENV) ruff==0.15.20 ty==0.0.55 pytest==9.1.1 pyyaml==6.0.3
+
+check: $(CHECK_BIN)/pytest
+	$(CHECK_BIN)/ruff check $(JL_BLOCKS)
+	$(CHECK_BIN)/ruff format --check $(JL_BLOCKS)
+	$(CHECK_BIN)/ty check --python $(CHECK_VENV) --exclude 'src/jl_blocks/jl_blocks/ros/' $(JL_BLOCKS)/jl_blocks $(JL_BLOCKS)/test
+	PYTHONPATH=$(JL_BLOCKS) $(CHECK_BIN)/pytest -q $(JL_BLOCKS)/test test/test_deploy.py
+ifneq ($(MISSIONS),)
+	PYTHONPATH=$(JL_BLOCKS) $(CHECK_BIN)/python -m jl_blocks.cli check $(MISSIONS)
+endif
+
+# L3: fly the jl_mission safety contract, then a mission file through the
+# mission_runner, in headless SITL (spec section 8).
+# Needs the jacob_ladder_sim container (./docker/run_sim_container.sh) with
+# jl_mission_interfaces, jl_mission and jl_blocks built by colcon inside it.
+SIM_CONTAINER ?= jacob_ladder_sim
+
+# It restarts the container, killing anything else running in it.
+sitl-test:
+	docker restart $(SIM_CONTAINER) > /dev/null
+	sleep 3
+	docker exec --user user -w $(CURDIR) $(SIM_CONTAINER) bash -c 'source /opt/ros/humble/setup.bash && source install/setup.bash && test/sitl_all.sh'
+
+# Fly one mission file headless and check it, e.g.
+#   make sitl-mission MISSION=missions/takeoff_hold_land.yaml ARGS='--expect "takeoff hold land" --finished'
+# See test/sitl_mission.sh for the options. Also restarts the container.
+sitl-mission:
+	docker restart $(SIM_CONTAINER) > /dev/null
+	sleep 3
+	docker exec --user user -w $(CURDIR) $(SIM_CONTAINER) bash -c 'source /opt/ros/humble/setup.bash && source install/setup.bash && test/sitl_mission.sh $(MISSION) $(ARGS)'
+
+.PHONY: all format build clean check sitl-test sitl-mission

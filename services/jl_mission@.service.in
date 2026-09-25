@@ -1,0 +1,25 @@
+[Unit]
+Description=Mission %i (jl_mission + mission_runner, from missions/%i.yaml)
+Documentation=file://@JL_WS_ROOT@/config/flight.yaml
+# Needs the DDS link to reach PX4, but not the network: the airframe flies
+# with no WiFi. Same ordering as takeoff_hold.service.
+After=dds_agent.service translation_node.service
+Wants=dds_agent.service
+# Registration retries until the FMU answers; never give up.
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+User=@JL_USER@
+Group=@JL_GROUP@
+WorkingDirectory=@JL_WS_ROOT@
+ExecStart=/bin/bash @JL_WS_ROOT@/services/run_jl_mission.sh %i
+# always: `ros2 launch` can exit 0 when its nodes die.
+Restart=always
+RestartSec=5s
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=jl_mission_%i
+
+[Install]
+WantedBy=multi-user.target

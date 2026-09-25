@@ -1,0 +1,18 @@
+# L3 acceptance (spec section 8): the DroneSmoothPlanner ArUco demo
+# (src/drogue_flight/docs/aruco_sitl.md) as a mission file. The front camera
+# finds the vertical tag, and the drone keeps 3 m in front of it.
+# Flown by test/sitl_all.sh in gazebo/worlds/aruco_dual_ids.sdf.
+name: ArucoStandoff
+target:
+  aruco_tag: {camera: front}
+
+steps:
+  - takeoff: {height: 1.0}
+  - search: {pattern: hold}
+    until: target_seen
+    timeout: 30
+    on_fail: land
+  - track: {standoff: 3.0}
+    until: never
+    on_fail: land
+  - land: {}

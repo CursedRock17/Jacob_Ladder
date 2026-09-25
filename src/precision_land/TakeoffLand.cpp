@@ -13,6 +13,7 @@ TakeoffLandMode::TakeoffLandMode(rclcpp::Node& node)
 	: ModeBase(node, Settings{kTakeoffLandModeName, false})
 	, _node(node)
 	, _state_pub(node)
+	, _tracking_error(node)
 	, _base_position(Eigen::Vector3f::Zero())
 	, _hold_position(Eigen::Vector3f::Zero())
 {
@@ -103,6 +104,7 @@ void TakeoffLandMode::updateSetpoint(float dt_s)
 				.withPosition(_hold_position)
 				.withYaw(0.0f)
 		);
+		_tracking_error.publish(_hold_position, _vehicle_local_position->positionNed());
 		break;
 	}
 
@@ -134,6 +136,7 @@ void TakeoffLandMode::updateSetpoint(float dt_s)
 				.withVelocityZ(_state == TakeoffState::Holding ? 0.0f : -_climb_rate)
 				.withYaw(0.0f)
 		);
+		_tracking_error.publish(_hold_position, _vehicle_local_position->positionNed());
 		break;
 	}
 
@@ -147,6 +150,7 @@ void TakeoffLandMode::updateSetpoint(float dt_s)
 				.withPosition(_hold_position)
 				.withYaw(0.0f)
 		);
+		_tracking_error.publish(_hold_position, _vehicle_local_position->positionNed());
 
 		// Hovered at target for the full duration — descend before handing
 		// off to land(), which drops at MPC_LAND_SPEED (min 0.6 m/s).
@@ -179,6 +183,7 @@ void TakeoffLandMode::updateSetpoint(float dt_s)
 				.withVelocityZ(at_handoff ? 0.0f : _descent_rate)
 				.withYaw(0.0f)
 		);
+		_tracking_error.publish(_hold_position, _vehicle_local_position->positionNed());
 
 		// Reached the handoff height — let the executor's land() finish the
 		// last stretch so PX4's land detector owns the touchdown.

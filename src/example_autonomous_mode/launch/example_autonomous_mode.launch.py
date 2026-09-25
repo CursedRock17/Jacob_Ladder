@@ -2,7 +2,7 @@
 
 Deliberately minimal: it starts the combined executor/mode node and nothing
 else. The executor is ready while disarmed; selecting the registered mode starts
-its arm and takeoff sequence. The modes in `jacob_manual` also bring up RViz,
+its arm and takeoff sequence. The modes in `precision_land` also bring up RViz,
 a visualizer node, and a rosbag recorder. Add those once your mode needs them.
 
 PX4 and the DDS agent must already be running; see the repository README.
