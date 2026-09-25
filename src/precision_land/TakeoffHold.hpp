@@ -1,6 +1,7 @@
 #pragma once
 
 #include "StatePublisher.hpp"
+#include "TrackingErrorPublisher.hpp"
 
 #include <px4_ros2/components/health_and_arming_checks.hpp>
 #include <px4_ros2/components/mode.hpp>
@@ -51,6 +52,7 @@ private:
 
 	rclcpp::Node& _node;
 	StatePublisher _state_pub;
+	TrackingErrorPublisher _tracking_error;
 
 	std::shared_ptr<px4_ros2::OdometryLocalPosition> _vehicle_local_position;
 	std::shared_ptr<px4_ros2::TrajectorySetpointType> _trajectory_setpoint;

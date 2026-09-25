@@ -1,37 +1,37 @@
 # External Modes
 ------------------
-This project takes advantage of External Modes for any and all autonomous control. External modes allow our drone to have autonomously functionality at the switch of a button on the safety handset and can be engaged ahead of time. They are the standard interface for working with autonomous algorithms through the ROS 2 / PX4 Stack that this drone uses.
-External modes are created with the [PX4 ROS2 Interface Library](https://github.com/Auterion/px4-ros2-interface-lib), and 
-utilize ROS 2 nodes to interact with PX4 setpoints. 
-External modes are a superior alternative to `offboard` mode that many people are familiar with.
+This project uses External Modes for all of its autonomous control. An external mode lets the drone fly autonomously at the flip of a switch on the safety handset, and you can engage it ahead of time. External modes are the standard way to run autonomous algorithms on the ROS 2 / PX4 stack this drone uses.
+You build them with the [PX4 ROS2 Interface Library](https://github.com/Auterion/px4-ros2-interface-lib), and they
+use ROS 2 nodes to send setpoints to PX4.
+They replace the `offboard` mode that many people are familiar with.
 
-Fantastic [video](https://www.youtube.com/watch?v=3zRCIsq_MCE) w/more information
+This [video](https://www.youtube.com/watch?v=3zRCIsq_MCE) has more information.
 
 #### Benefits
 1) They don't require MAVLink
-2) There's no limit to number of setpoint types
-3) More general integration with ROS 2, extended controls and increasing features
+2) There's no limit to the number of setpoint types
+3) They integrate more generally with ROS 2, with extended controls and a growing feature set
 4) You can use multiple applications to control the vehicle
 
 #### Caveats
-You have to match the message type between PX4 ([uORB](https://docs.px4.io/main/en/middleware/uorb)) and ROS 2 [interfaces](https://docs.ros.org/en/humble/Concepts/Basic/About-Interfaces.html), this
-can be subverted by running the message [translation node](https://docs.px4.io/main/en/ros2/px4_ros2_msg_translation_node) :
+The message types have to match between PX4 ([uORB](https://docs.px4.io/main/en/middleware/uorb)) and ROS 2 [interfaces](https://docs.ros.org/en/humble/Concepts/Basic/About-Interfaces.html). You
+can get around this by running the message [translation node](https://docs.px4.io/main/en/ros2/px4_ros2_msg_translation_node):
 ```shell
 ros2 run translation_node translation_node_bin
 ```
-which is how we handle
-it in this project. In your custom mode constructor simply add the following line:
+That's how this project
+handles it. In your custom mode's constructor, add the following line:
 ```Cpp
 setSkipMessageCompatibilityCheck();
 ```
 
 ### File Structure
-As per usual C++ guidelines we're going to split our autonomous set up into a header (`.hpp`) file and source (`.cpp`) file. The mode and executor can live in the same file, therefore for some autonomous behavior you should only end up with two files.
+Following the usual C++ conventions, split each autonomous setup into a header (`.hpp`) file and a source (`.cpp`) file. The mode and executor can live in the same file, so one autonomous behavior should only take two files.
 
 #### Header File Essentials
-While each header file may contain different packages and naming practices, they'll generally all have the same things in them:
+Header files differ in which packages they include and how they name things, but they generally contain the same pieces:
 **Packages + Header Guard**:
-Include our header guard and necessaary packages to actually run our setup:
+Add the header guard and the packages the setup needs to run:
 ```cpp
 #pragma once
 
@@ -51,7 +51,7 @@ Include our header guard and necessaary packages to actually run our setup:
 ```
 
 **Naming**:
-Each autonomous mode should use a namespace to differentiate its information from other packages. It should also use a precise name which gets serialized in QGC to correctly identify the mode you're launching each and everytime. All further mode **must** live inside of the namespace
+Put each autonomous mode in its own namespace so its names don't clash with other packages. Also give it a precise name: QGC shows that name, so it's how you pick the right mode every time. Everything else for the mode **must** live inside the namespace.
 ```cpp
 namespace simple_external {
 inline constexpr char kSimpleExternalModeName[] = "SimpleExternal";
@@ -62,8 +62,8 @@ inline constexpr bool kSimpleExternalDebugOutput = true;
 ```
 
 ### Executors
-Executors handle the overall state machine for the drone. They also register certain modes (states) at any given
-time, based on any set structure of conditions. It splits the whole workflow into 2 and allows a better molding of your autonomous setup
+An executor runs the drone's overall state machine. It also decides which modes (states) run at any given
+time, based on whatever conditions you set. This splits the workflow in two, which gives you more control over how the autonomous setup behaves.
 
 
 **Executor Header File**:
@@ -71,20 +71,20 @@ time, based on any set structure of conditions. It splits the whole workflow int
 
 
 ### Modes
-A Component that sends setpoints (one or more) and can perform a number of tasks
-agnostic to just flying (i.e. check battery state, view local position, etc.)
+A mode is a component that sends one or more setpoints. It can also do tasks
+besides flying, such as checking the battery state or reading the local position.
 
-The following is a super simple mode that can change states and registers itself
-The full code is in the "src/jacob_manual/SimpleExternal.cpp", you can build this 
-"template" out to fit your ideal mission.
+Below is a very simple mode that can change states and registers itself.
+The full code is in "general_docs/SimpleExternal.cpp", and you can use it as a
+template for your own mission.
 
-*Note*, the `SimpleExternalMode` class present won't run anything useful, but will create a mode that PX4/QGC will be able to recognize. The class serves as a shell for the necessary functions users will need.
+*Note*: the `SimpleExternalMode` class doesn't do anything useful on its own, but it creates a mode that PX4 and QGC will recognize. It's a shell containing the functions you'll need.
 
 **Mode Header File**:
 
 
 **Simple Constructor**:
-We first need to create a simple constructor which will inherit the necessary parameters from the `ModeBase` and ROS 2 `Node` classes. We'll standardize our node, create settings, allow our messages to be bridged between PX4 and ROS 2, and declare any and all parameters necessary for the drone. [Parameters](https://docs.ros.org/en/foxy/Tutorials/Beginner-CLI-Tools/Understanding-ROS2-Parameters/Understanding-ROS2-Parameters.html) are essentially easy to control variables in the ROS ecosystem. 
+First, write a constructor that passes what's needed to the `ModeBase` and ROS 2 `Node` classes. It sets up the node, creates the mode's settings, lets messages pass between PX4 and ROS 2, and declares every parameter the drone needs. [Parameters](https://docs.ros.org/en/foxy/Tutorials/Beginner-CLI-Tools/Understanding-ROS2-Parameters/Understanding-ROS2-Parameters.html) are variables in the ROS ecosystem that are easy to change.
 ```cpp
 SimpleExternalMode::SimpleExternalMode(rclcpp::Node& node)
 	: ModeBase(node, ModeBase::Settings{kSimpleExternalModeName})
@@ -102,9 +102,9 @@ SimpleExternalMode::SimpleExternalMode(rclcpp::Node& node)
 }
 ```
 **Load Parameters**:
-We have the ability to load parameters at compile time from our ROS 2 parameters list.
-This can feature as many parameters as you want to change at any given time, just declare and
-grab each of the parameters you want.
+The mode can load parameters at compile time from our ROS 2 parameter list.
+You can add as many parameters as you want to be able to change. Just declare and
+get each one.
 ```cpp
 void SimpleExternalMode::loadParameters()
 {
@@ -116,8 +116,8 @@ void SimpleExternalMode::loadParameters()
 ```
 
 **Activation Functions**:
-Next, we neeed some standard functions. One for when the external mode is switched on, 
-the other, when the external mode is switched off.
+Next, add two standard functions: one runs when the external mode is switched on,
+the other when it's switched off.
 ```cpp
 void SimpleExternalMode::onActivate()
 {
@@ -135,8 +135,8 @@ void SimpleExternalMode::onDeactivate()
 ```
 
 **State Machine**:
-This is the guts of the External Mode. You'll put everything into an `updateSetpoint` function which will run once in every portion of the control loop. The
-state machine that you'll use will determine what behaviors the drone will exhibit (takeoff, landing, searching, hovering, need to recharge, anything). This is where autonomous code will have to be placed when utilizing the drone.
+This is the core of the external mode. Everything goes in the `updateSetpoint` function, which runs once every control loop. The
+state machine decides what the drone does (takeoff, landing, searching, hovering, returning to recharge, or anything else). Your autonomous code goes here.
 ```cpp
 void SimpleExternalMode::updateSetpoint(float dt_s)
 {
@@ -156,19 +156,19 @@ void SimpleExternalMode::updateSetpoint(float dt_s)
 ```
 
 ### Linking into the project
-Since we're using `cpp` in our colcon project, we'll use a `CMakeLists.txt` file in each folder. Therefore, when you finish your mode+executor pair, be sure to upload into that CMake file. There should be 4 references to the name of your mode in that file. First, make sure you any packages you desire after basic cmake setup, this will be towards the top, simply add addition external packages with:
+This is a C++ colcon project, so each package folder has a `CMakeLists.txt` file. When you finish a mode + executor pair, add it to that file. Your mode's name should appear there 4 times. First, near the top, after the basic CMake setup, add any extra packages you need with:
 ```cpp
 find_package(some_package REQUIRED)
 ```
 
-Then, we need to add an executable to make this easy to launch, label your desired file and add in the source file. We'll also need to link dependencies and add compilation features:
+Next, add an executable so the mode is easy to launch: name it and list its source file. Then link its dependencies and set its compile features:
 ```cpp
 add_executable(simple_external SimpleExternal.cpp)
 ament_target_dependencies(simple_external rclcpp Eigen3 px4_ros2_cpp std_msgs)
 target_compile_features(simple_external PUBLIC c_std_99 cxx_std_17)
 ```
 
-Finally, make sure to install our executables in the installation section:
+Finally, add the executable to the install section:
 ```cpp
 install(TARGETS
   simple_external
@@ -177,11 +177,11 @@ install(TARGETS
 ```
 
 ### Create Your Own Autonomous Mode (Template)
-We've provided an example node in the [precision_land](https://github.com/CursedRock17/Jacob_Ladder/tree/main/src/precision_land) directory which will autonomously takeoff, run some autonomous code that you HAVE to fill in, then land. This is a good stub for you if didn't quite understand what was just said and allows an easier time in running autonomous modes in PX4.
+The [precision_land](https://github.com/CursedRock17/Jacob_Ladder/tree/main/src/precision_land) directory has an example node that takes off autonomously, runs autonomous code that you HAVE to fill in, then lands. If the sections above didn't quite make sense, start from it: it makes running an autonomous mode in PX4 easier.
 
 #### Ensuring Mode is saved
 In the MAVLink Console run:
 ```bash
 commander status
 ```
-The result of the of External Mode channel should show up
+Your external mode should appear in the output.

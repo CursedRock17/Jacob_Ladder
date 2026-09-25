@@ -14,6 +14,7 @@ TakeoffHoldMode::TakeoffHoldMode(rclcpp::Node& node)
 	: ModeBase(node, Settings{kTakeoffHoldModeName, false})
 	, _node(node)
 	, _state_pub(node)
+	, _tracking_error(node)
 	, _base_position(Eigen::Vector3f::Zero())
 	, _hold_position(Eigen::Vector3f::Zero())
 {
@@ -163,6 +164,7 @@ void TakeoffHoldMode::updateSetpoint(float dt_s)
 				.withPosition(_hold_position)
 				.withYaw(0.0f)
 		);
+		_tracking_error.publish(_hold_position, _vehicle_local_position->positionNed());
 		break;
 	}
 
@@ -200,6 +202,7 @@ void TakeoffHoldMode::updateSetpoint(float dt_s)
 				.withVelocityZ(_state == TakeoffState::Holding ? 0.0f : -_climb_rate)
 				.withYaw(0.0f)
 		);
+		_tracking_error.publish(_hold_position, _vehicle_local_position->positionNed());
 		break;
 	}
 
@@ -213,6 +216,7 @@ void TakeoffHoldMode::updateSetpoint(float dt_s)
 				.withPosition(_hold_position)
 				.withYaw(0.0f)
 		);
+		_tracking_error.publish(_hold_position, _vehicle_local_position->positionNed());
 		break;
 	}
 }

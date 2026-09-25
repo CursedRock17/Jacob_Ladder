@@ -1,5 +1,8 @@
 #pragma once
 
+#include "StatePublisher.hpp"
+#include "TrackingErrorPublisher.hpp"
+
 #include <px4_ros2/components/mode.hpp>
 #include <px4_ros2/components/mode_executor.hpp>
 #include <px4_ros2/control/setpoint_types/experimental/trajectory.hpp>
@@ -74,6 +77,8 @@ private:
 
 private:
 	rclcpp::Node& _node;
+	StatePublisher _state_pub;
+	TrackingErrorPublisher _tracking_error;
 
 	rclcpp::Subscription<geometry_msgs::msg::PoseStamped>::SharedPtr _front_target_sub;
 	rclcpp::Subscription<geometry_msgs::msg::PoseStamped>::SharedPtr _down_target_sub;

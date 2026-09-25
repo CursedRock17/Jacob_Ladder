@@ -1,0 +1,7 @@
+# The smallest mission: take off, hover for 5 s, land.
+# Flown headless by test/sitl_runner_smoke.sh (make sitl-test).
+name: TakeoffHoldLand
+steps:
+  - takeoff: {height: 1.5}
+  - hold: {duration: 5}
+  - land: {}

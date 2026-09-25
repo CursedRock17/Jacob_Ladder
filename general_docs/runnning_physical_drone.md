@@ -147,7 +147,7 @@ for the physical camera node must be correct to match these remaps
 
 **Shell 5 — Flight Mode** (pick whichever mode you're flying)
 ```bash
-ros2 launch jacob_manual precision_land.launch.py
+ros2 launch precision_land precision_land.launch.py
 ```
 
 Make sure this mode comes up in QGC. You can see which External Mode it took over by going to the Mavlink console and typing: `commander status`

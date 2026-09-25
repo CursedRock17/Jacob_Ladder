@@ -13,6 +13,8 @@ namespace precision_land
 PrecisionLand::PrecisionLand(rclcpp::Node& node)
 	: ModeBase(node, Settings{kPrecisionLandModeName, false})
 	, _node(node)
+	, _state_pub(node)
+	, _tracking_error(node)
 {
 	setSkipMessageCompatibilityCheck();
 
@@ -175,6 +177,7 @@ void PrecisionLand::updateSetpoint(float dt_s)
 				.withPosition(_hold_position)
 				.withYaw(0.0f)
 		);
+		_tracking_error.publish(_hold_position, _vehicle_local_position->positionNed());
 		break;
 	}
 
@@ -207,6 +210,7 @@ void PrecisionLand::updateSetpoint(float dt_s)
 				.withVelocityZ(-_climb_rate)
 				.withYaw(0.0f)
 		);
+		_tracking_error.publish(_hold_position, _vehicle_local_position->positionNed());
 		break;
 	}
 
@@ -232,6 +236,7 @@ void PrecisionLand::updateSetpoint(float dt_s)
 		auto waypoint_position = _search_waypoints[_search_waypoint_index];
 
 		_trajectory_setpoint->updatePosition(waypoint_position);
+		_tracking_error.publish(waypoint_position, _vehicle_local_position->positionNed());
 
 		if (positionReached(waypoint_position)) {
 			_search_waypoint_index++;
@@ -264,6 +269,7 @@ void PrecisionLand::updateSetpoint(float dt_s)
 		auto target_position = Eigen::Vector3f(_tag.position.x(), _tag.position.y(), _approach_altitude);
 
 		_trajectory_setpoint->updatePosition(target_position);
+		_tracking_error.publish(target_position, _vehicle_local_position->positionNed());
 
 		if (positionReached(target_position)) {
 			switchToState(State::Descend);
@@ -451,6 +457,8 @@ std::string PrecisionLand::stateName(State state)
 
 void PrecisionLand::switchToState(State state)
 {
+	_state_pub.set(stateName(state));
+
 	RCLCPP_INFO(_node.get_logger(), "Switching to %s", stateName(state).c_str());
 	_state = state;
 }

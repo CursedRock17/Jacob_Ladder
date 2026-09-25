@@ -36,6 +36,13 @@ add_executable(precision_land
 ament_target_dependencies(precision_land rclcpp Eigen3 px4_ros2_cpp geometry_msgs tf2_ros tf2)
 target_compile_features(precision_land PUBLIC c_std_99 cxx_std_17)
 
+# Autonomous precision landing — arms, takes off, searches, lands, and disarms by itself
+add_executable(precision_land_auto
+    PrecisionLandAuto.cpp
+)
+ament_target_dependencies(precision_land_auto rclcpp Eigen3 px4_ros2_cpp std_msgs geometry_msgs tf2_ros tf2 px4_msgs)
+target_compile_features(precision_land_auto PUBLIC c_std_99 cxx_std_17)
+
 # Add Visualizer for ROS topics
 add_executable(visualizer
     Visualizer.cpp
@@ -75,6 +82,7 @@ target_compile_features(front_to_precision_land PUBLIC c_std_99 cxx_std_17)
 install(TARGETS
   blank_mode
   precision_land
+  precision_land_auto
   takeoff_land
   takeoff_hold
   front_approach

@@ -1,0 +1,16 @@
+# Lint, type-check and unit-test the mission blocks on every push and PR.
+# Runs the same `make check` developers run locally; the tool versions are
+# pinned in the Makefile. No ROS is needed: jl_blocks.core is plain Python.
+name: check
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - run: make check

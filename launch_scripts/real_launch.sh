@@ -20,7 +20,7 @@ commands=(
     #"cd ${WS_DIR} && source install/setup.bash && MicroXRCEAgent udp4 -p 8888"
     #"cd ${WS_DIR} && source install/setup.bash && ros2 run translation_node translation_node_bin"
     #"cd ${WS_DIR} && source install/setup.bash && ros2 launch aruco_tracker front_camera_aruco.launch.py"
-    "cd ${WS_DIR} && source install/setup.bash && ros2 launch jacob_manual front_approach.launch.py"
+    "cd ${WS_DIR} && source install/setup.bash && ros2 launch precision_land front_approach.launch.py"
     #"cd ${WS_DIR} && source install/setup.bash && ros2 launch precision_land takeoff_hold.launch.py"
     #"cd ${WS_DIR} && source install/setup.bash && rviz2"
     #"cd ${WS_DIR} && source install/setup.bash && ros2 launch precision_land blank_mode.launch.py"

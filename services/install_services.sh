@@ -159,10 +159,16 @@ echo "created $ROS_LOG_DIR"
 sudo systemctl daemon-reload
 
 if [ "$do_enable" -eq 1 ]; then
-    echo
-    sudo systemctl enable --now "${units[@]}"
-    echo
+    # A template (name@) can only be enabled per instance, e.g.
+    # jl_mission@takeoff_hold_land -- deploy.sh does that.
+    enable_units=()
     for unit in "${units[@]}"; do
+        [[ "$unit" == *@ ]] || enable_units+=("$unit")
+    done
+    echo
+    sudo systemctl enable --now "${enable_units[@]}"
+    echo
+    for unit in "${enable_units[@]}"; do
         printf '%-20s %s\n' "$unit" "$(systemctl is-active "$unit" 2>&1)"
     done
 else

@@ -1,7 +1,7 @@
 """Launch the example autonomous mode.
 
 Deliberately minimal: it starts the mode node and nothing else. The modes in
-`jacob_manual` also bring up RViz, a visualizer node, and a rosbag recorder,
+`precision_land` also bring up RViz, a visualizer node, and a rosbag recorder,
 but those are separate concerns -- add them once your own mode needs them.
 
 PX4 and the DDS agent must already be running; see the repository README.

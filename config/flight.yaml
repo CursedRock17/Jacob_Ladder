@@ -1,0 +1,11 @@
+# What this airframe registers at boot (spec section 7). After editing, run
+# ./deploy.sh on the drone: it checks, builds, and enables one
+# jl_mission@<file> service per mission below, then reports readiness.
+#
+# missions: files in missions/ -- each appears in QGC under its `name:`.
+# helpers:  boot services the missions need: vio, aruco_tracker, battery_monitor.
+#           A helper left out here is stopped and disabled by deploy.sh.
+# blocks:   optional folders or .py files with your own blocks.
+missions:
+  - missions/takeoff_hold_land.yaml
+helpers: [vio, battery_monitor]

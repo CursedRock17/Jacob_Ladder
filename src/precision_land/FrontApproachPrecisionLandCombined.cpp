@@ -12,6 +12,8 @@ namespace precision_land
 FrontApproachPrecisionLandCombined::FrontApproachPrecisionLandCombined(rclcpp::Node& node)
 	: ModeBase(node, ModeBase::Settings{kFrontToPrecisionModeName, false})
 	, _node(node)
+	, _state_pub(node)
+	, _tracking_error(node)
 {
 	setSkipMessageCompatibilityCheck();
 
@@ -190,6 +192,7 @@ void FrontApproachPrecisionLandCombined::updateSetpoint(float dt_s)
 				.withPosition(_climb_hold_position)
 				.withYaw(0.0f)
 		);
+		_tracking_error.publish(_climb_hold_position, _vehicle_local_position->positionNed());
 		break;
 	}
 
@@ -220,6 +223,7 @@ void FrontApproachPrecisionLandCombined::updateSetpoint(float dt_s)
 				.withVelocityZ(-_climb_rate)
 				.withYaw(0.0f)
 		);
+		_tracking_error.publish(_climb_hold_position, _vehicle_local_position->positionNed());
 		break;
 	}
 
@@ -234,6 +238,7 @@ void FrontApproachPrecisionLandCombined::updateSetpoint(float dt_s)
 			_vehicle_local_position->positionNed().z());
 		Eigen::Vector3f hold = _vehicle_local_position->positionNed();
 		_trajectory_setpoint->updatePosition(hold);
+		_tracking_error.publish(hold, _vehicle_local_position->positionNed());
 
 		if (_front_tag.valid() && !front_lost) {
 			switchToState(State::FrontApproach);
@@ -322,6 +327,7 @@ void FrontApproachPrecisionLandCombined::updateSetpoint(float dt_s)
 		_precision_target.z() += _param_precision_descent_vel * dt_s;
 
 		_trajectory_setpoint->updatePosition(_precision_target);
+		_tracking_error.publish(_precision_target, _vehicle_local_position->positionNed());
 
 		if (_land_detected) {
 			switchToState(State::Finished);
@@ -332,6 +338,7 @@ void FrontApproachPrecisionLandCombined::updateSetpoint(float dt_s)
 	case State::Finished: {
 		Eigen::Vector3f hold = _vehicle_local_position->positionNed();
 		_trajectory_setpoint->updatePosition(hold);
+		_tracking_error.publish(hold, _vehicle_local_position->positionNed());
 		ModeBase::completed(px4_ros2::Result::Success);
 		break;
 	}
@@ -391,6 +398,8 @@ void FrontApproachPrecisionLandCombined::resetFrontController()
 
 void FrontApproachPrecisionLandCombined::switchToState(State state)
 {
+	_state_pub.set(stateName(state));
+
 	if (_state == state) {
 		return;
 	}

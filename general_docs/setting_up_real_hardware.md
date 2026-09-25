@@ -58,8 +58,8 @@ We'll need to add in our desired packages to get this drone off the ground and i
 1) Enter the Jacob_Ladder repository on the Jetson
 1a) Make sure the submodules are initialised — `git submodule update --init --recursive`.
     Nothing needs patching by hand: `px4-ros2-interface-lib` points at a fork
-    carrying the `ModeExecutorBase` fix that `precision_land`, `drogue_flight`
-    and `jacob_manual` need to compile. (This used to be a manual
+    carrying the `ModeExecutorBase` fix that `precision_land` and `drogue_flight`
+    need to compile. (This used to be a manual
     `git apply patch.diff`; see the
     [README](../README.md#about-the-px4-ros2-interface-lib-submodule).)
 2) Navigate to the [Installation Scripts Directory](../installation_scripts) and make sure all of the shell scripts have permissions `chmod +x *.sh`

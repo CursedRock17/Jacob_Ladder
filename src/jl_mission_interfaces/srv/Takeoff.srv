@@ -1,0 +1,6 @@
+# Take off to `height` metres above the takeoff point, then hand over to the mission.
+# If already airborne, height is ignored and the mission takes over where it is.
+float32 height
+---
+bool success
+string message
