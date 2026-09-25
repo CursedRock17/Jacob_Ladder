@@ -1,11 +1,13 @@
-# Lint, type-check and unit-test the mission blocks on every push and PR.
+# Lint, type-check and unit-test the mission blocks on every branch push.
+# Push checks also appear on PRs opened from branches in this repository.
 # Runs the same `make check` developers run locally; the tool versions are
 # pinned in the Makefile. No ROS is needed: jl_blocks.core is plain Python.
 name: check
 
 on:
   push:
-  pull_request:
+    branches:
+      - '**'
 
 jobs:
   check:
