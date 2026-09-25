@@ -11,7 +11,7 @@
   - the vehicle state must be known before anything is sent;
   - it never sends setpoints while landed;
   - after an abort, it holds for 2 s, then asks to land.
-  
+
   The ROS node `jl_blocks.ros.mission_runner` only moves data between topics and `Session`, so almost everything is covered by plain `pytest` in `make check`.
 - **Target blocks** receive camera detections through `observe()`. The detection is converted to NED immediately, using the vehicle state at the moment it arrived (like `FrontApproach`), and `estimate()` returns it while it is fresh.
 

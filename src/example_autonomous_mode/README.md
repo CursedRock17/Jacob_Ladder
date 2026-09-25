@@ -1,126 +1,87 @@
-# example_autonomous_mode
+# Example autonomous mode
 
-A complete, working PX4 **external flight mode** in one file pair, meant to be
-read start to finish and then copied. It takes off to a low hover, holds, and
-lands — nothing else. Every other mode in this workspace is this shape with more
-states in the middle.
+This example pairs a PX4 external mode with an executor. The executor arms, requests PX4's native takeoff, schedules the mode, requests native landing, then waits for PX4 to disarm. While scheduled, the mode holds position and makes a short controlled descent. There is no optical-flow initialization; this aircraft no longer has that sensor.
 
-If you want an *empty* skeleton rather than a working mode, see
-`precision_land/BlankMode.cpp` (launched by `launch_scripts/offboard_blank.sh`).
-That one registers with PX4 and does nothing, which is useful when you already
-know the framework. Start here instead if you want to see a mode that actually
-flies, with parameters, a state machine, and debug topics wired up.
+Start with [External Modes](../../general_docs/external_modes.md) if registration, setpoints, or mode executors are new to you. A simple mode can be selected by the pilot after takeoff. This example includes an executor because it needs to sequence PX4 operations around the custom setpoint behavior, like the drogue-flight workflow.
 
-## What is an External Mode?
+> Selecting this mode starts an automatic arm and takeoff. Try it in SITL first. For initial hardware integration, remove the propellers and keep a pilot ready to take over. Check PX4's configured native-takeoff altitude before flight.
 
-PX4 supports custom modes that run on the companion computer instead of the
-flight controller. The node registers a mode with PX4 through `px4_ros2`, and it
-then appears in QGroundControl next to Stabilized, Position, and Mission. While
-the mode is active it must keep sending setpoints; if the companion computer
-stops talking, PX4 failsafes on its own.
+## How the pieces fit
 
-## State Machine
+`ExampleAutonomousModeExecutor` owns arm, native takeoff with the vehicle's configured altitude, `scheduleMode()`, native land, and `waitUntilDisarmed()`. `ExampleAutonomousMode` owns the continuous NED setpoints during hold and descent. The executor does not send a disarm command: PX4's landing/disarm behavior and settings own that step. A pilot takeover or failsafe produces a non-success mode result, and the executor does not then issue a new landing command.
 
+```mermaid
+stateDiagram-v2
+    [*] --> Arming: operator selects mode
+    Arming --> TakingOff: arm succeeds
+    TakingOff --> RunningMode: PX4 reports takeoff complete
+    RunningMode --> Landing: mode reports success
+    Landing --> WaitingForDisarm: native land completes
+    WaitingForDisarm --> [*]: PX4 reports disarmed
+
+    state RunningMode {
+        [*] --> Holding
+        Holding --> Holding: elapsed < hold_duration
+        Holding --> Descending: elapsed >= hold_duration and ground sample available
+        Holding --> Finished: elapsed >= hold_duration and no ground sample
+        Descending --> Descending: above handoff height and not landed
+        Descending --> Finished: handoff height reached or PX4 reports landed
+        Finished --> [*]: report success once
+    }
 ```
-InitialTakeoffAltitude --> Holding --> Descending --> Finished
-```
 
-| State | What it does |
-|-------|-------------|
-| **Idle** | Not active. Entered on `onDeactivate()`. |
-| **InitialTakeoffAltitude** | Rise to `optical_flow_height` and hover there for `optical_flow_hold_time` seconds, giving the optical flow sensor a close, textured surface to lock onto before climbing away. |
-| **Holding** | Hover at the current position for `hold_duration` seconds. **This is where your own states go.** |
-| **Descending** | Command a constant downward velocity (`descent_vel`) until PX4's landing detector fires, or until the drone is within `landing_height` of where it took off. |
-| **Finished** | Hold position and report success to PX4 (once, on entry). |
+The executor calls `takeoff()` without an altitude override, so PX4 uses its configured native-takeoff altitude. The mode starts only after PX4 reports that takeoff has completed. Set the vehicle's takeoff altitude in PX4 before flying; no optical-flow height or settling delay is required.
 
-## Build and Run
+`VehicleLandDetected` is an optional input to this example, not a heartbeat or a requirement for every external mode. A landed sample before takeoff supplies the ground z used for the controlled-descent handoff. If no sample arrives, the mode skips that segment and asks PX4 to perform native landing after the hold. PX4 handles touchdown detection and disarming; the mode does not infer touchdown from loss of messages. `/drone_state` and `/tracking_error` are optional debugging outputs, not requirements for mode registration or flight.
+
+## Build and run
+
+PX4 or SITL, the Micro XRCE-DDS agent, the message translation node used by this repository, ROS 2 Humble, `px4_msgs`, and `px4_ros2_cpp` must be available. See the [workspace README](../../README.md) for setup.
 
 ```bash
-# From the workspace root, with PX4 SITL and the DDS agent already running
 source /opt/ros/humble/setup.bash
-colcon build --packages-select example_autonomous_mode
+colcon build --packages-up-to example_autonomous_mode
 source install/setup.bash
-
 ros2 launch example_autonomous_mode example_autonomous_mode.launch.py
 ```
 
-Then select **ExampleAutonomousMode** in QGroundControl. The mode arms nothing
-on its own — take off manually or switch into it from a hover.
+Wait for successful registration, then select **ExampleAutonomousMode** in QGroundControl. The executor is allowed to activate while disarmed so it can arm, but launching the node alone does not select the mode. In QGroundControl's MAVLink Console, `commander status` prints an `External Mode N` entry with the registered name. Match that number to the external-mode entry in the flight-mode list or switch assignment. PX4's [control-interface guide](https://docs.px4.io/v1.16/en/ros2/px4_ros2_control_interface) documents the mapping.
 
-## Parameters
+![Illustration of the commander status output and matching QGroundControl mode entry](assets/qgc-mode-selection.svg)
 
-Configured in `cfg/example_autonomous_mode_params.yaml`:
+This is an annotated sketch, not a screenshot of a live vehicle; the menu varies by QGroundControl version and setup.
 
-| Parameter | Default | Unit | Description |
-|-----------|---------|------|-------------|
-| `optical_flow_height` | 0.25 | m | Height of the initial low hover |
-| `optical_flow_hold_time` | 3.0 | s | How long to hold at that height |
-| `delta_position` | 0.05 | m | "Close enough" tolerance for reaching a target |
-| `hold_duration` | 7.5 | s | How long to hover before descending |
-| `descent_vel` | 0.5 | m/s | Downward speed during landing |
-| `landing_height` | 0.10 | m | Height above takeoff counted as landed, as a backstop if the landing detector never fires |
+The mode and executor both call `setSkipMessageCompatibilityCheck()`. They register independently, and this repository uses a PX4/`px4_msgs` version translation path. These calls are required for this checkout; removing either one can make registration fail. They do not replace the translation node or make arbitrary message versions compatible.
 
-Override one at launch:
+## Parameters and topics
 
-```bash
-ros2 launch example_autonomous_mode example_autonomous_mode.launch.py
-# or, to change a value permanently, edit cfg/example_autonomous_mode_params.yaml
-```
+[`cfg/example_autonomous_mode_params.yaml`](cfg/example_autonomous_mode_params.yaml) supplies the run-time values. Its top-level key must match the node name in the launch file. Edit the YAML and rebuild this package before launching with the changed file.
 
-## Debug Topics
+| Parameter | Default | Meaning |
+| --- | ---: | --- |
+| `hold_duration` | 7.5 s | Time at the reached position. |
+| `descent_vel` | 0.5 m/s | Positive-down NED speed during controlled descent. |
+| `landing_height` | 0.10 m | Height above the observed ground plane where PX4 native landing takes over. |
 
-| Topic | Type | Description |
-|-------|------|-------------|
-| `/drone_state` | `std_msgs/String` | The state name, published on every transition |
-| `/tracking_error` | `geometry_msgs/Vector3Stamped` | Commanded minus actual position, in NED. If this grows instead of shrinking, PX4 is not following your setpoints. |
+| Topic | Use |
+| --- | --- |
+| `/fmu/out/vehicle_local_position_v1` | Mode's local position through `OdometryLocalPosition` in this checkout. |
+| `/fmu/out/vehicle_land_detected` | Optional preflight ground sample and descent stop signal. |
+| `/drone_state` | Optional state-transition messages. |
+| `/tracking_error` | Optional commanded-minus-actual NED position while using position setpoints. |
 
-```bash
-ros2 topic echo /drone_state
-```
+PX4 local position is **NED**: x is north, y is east, and z grows downward. Climbing decreases z; positive z velocity descends.
 
-## Coordinate Frames
+![NED axes showing north, east, and positive-down directions](assets/NED.excalidraw.svg)
 
-PX4 uses **NED** (North-East-Down), so **up is negative z**. That is why the
-takeoff target is computed by *subtracting*:
+The tracking-error message uses `frame_id = "odom"` but its components follow those local NED axes. During velocity-controlled descent it is not published.
 
-```cpp
-_hold_position.z() = _base_position.z() - _optical_flow_height;
-```
+## Using the classes in another package
 
-and why "how much altitude have we gained" is `base - current`. Getting this
-backwards is the single most common mistake when writing a new mode.
+Copy `ExampleAutonomousMode.hpp` and `ExampleAutonomousMode.cpp` into your ROS 2 package. Add the `.cpp` to your `add_executable(...)` source list. Bring over the `find_package(...)` and `ament_target_dependencies(...)` entries for `rclcpp`, `Eigen3`, `px4_ros2_cpp`, `px4_msgs`, `std_msgs`, and `geometry_msgs` from this package's [`CMakeLists.txt`](CMakeLists.txt). Copy the YAML and launch file only if you want this parameter-loading and launch setup; update their package, executable, and node names together.
 
-All heights here are relative to `_base_position`, the position recorded in
-`onActivate()` — not to the local origin. The two are only the same when the
-mode happens to be activated at the origin's altitude.
+Rename the classes, namespace, and `kExampleAutonomousModeName`. PX4 stores the registered name in a [`char[25]` field](../px4_msgs/msg/RegisterExtComponentRequest.msg), and the [registration code](../px4-ros2-interface-lib/px4_ros2_cpp/src/components/registration.cpp) rejects names of 25 or more characters. Choose a unique name of at most 24 characters.
 
-## Writing Your Own Mode
+Add mission states to `State`, `updateSetpoint()`, and `stateName()`. Use `switchToState()` so dwell time and `/drone_state` update together. Keep a setpoint flowing while your state is active; `commandPosition()` also publishes the optional tracking error. Put new continuous mission behavior between `Holding` and `Finished`, and add executor states when you need another PX4 operation. Keep the non-success result path from automatically issuing landing after a pilot takeover.
 
-1. Copy this package to `src/your_mode`, then rename the package in
-   `package.xml` and `CMakeLists.txt` (`project()`, the `add_executable` target,
-   and the `install(TARGETS ...)` entry). ROS 2 package names must be lowercase
-   with underscores — no hyphens.
-2. Change `kExampleAutonomousModeName` in the header. **This string must be
-   unique across every mode registered with the same autopilot**, and PX4 caps
-   it at 24 characters. Two nodes claiming one name will collide.
-3. Add states to the `enum class State`, a `case` in `updateSetpoint()`, and a
-   name in `stateName()`. The compiler will tell you if you miss the last one —
-   the switch has no `default`, so `-Werror` catches unhandled values.
-4. Add parameters in `loadParameters()` and to the YAML. Declare the compiled
-   default as the fallback so the two cannot drift apart.
-5. Point your states at real work between `InitialTakeoffAltitude` and
-   `Descending`. Leave the takeoff and landing states alone until you have a
-   reason not to.
-
-`updateSetpoint()` runs at roughly 50 Hz and is passed `dt_s`, the time since
-the last call. Use it to integrate — `_hold_position.z() -= climb_rate * dt_s`
-is a rate-limited climb — rather than assuming a fixed loop period.
-
-## Formatting
-
-This package uses `clang-format` (see `.clang-format`), not the astyle
-configuration the older packages use:
-
-```bash
-clang-format -i src/example_autonomous_mode/*.cpp src/example_autonomous_mode/*.hpp
-```
+The interface library's [`SetpointBase::desiredUpdateRateHz()`](../px4-ros2-interface-lib/px4_ros2_cpp/include/px4_ros2/common/setpoint_base.hpp) requests 50 Hz by default. Its [mode timer](../px4-ros2-interface-lib/px4_ros2_cpp/src/components/mode.cpp) passes measured elapsed seconds to `updateSetpoint(float dt_s)`; scheduler timing can vary. Use `dt_s` for integration rather than assuming each call is exactly 0.02 seconds. PX4 may trigger a failsafe when the active mode becomes unresponsive or stops supplying required setpoints. The resulting action depends on vehicle configuration; it is not an automatic disarm simply because one heartbeat is missed. See the [PX4 failsafe and mode-requirements guide](https://docs.px4.io/v1.17/en/ros2/px4_ros2_control_interface#failsafes-and-mode-requirements).

@@ -4,7 +4,7 @@ Each of the subsections have their own respective READMEs and docs for full expl
 
 Jacob's Ladder is a modular, system-agnostic UAV command-and-control (C2) framework built on **ROS 2 Humble** and **PX4**. It lets you write autonomous drone missions entirely in ROS 2 — the same code runs in Gazebo simulation on your laptop and on real hardware in the field, with no rewrites needed.
 
-The framework uses PX4 **external modes** instead of the traditional offboard API. External modes register directly with PX4 through the companion computer, appearing as selectable flight modes in QGroundControl alongside the built-in ones (Stabilized, Position, Mission, etc.). If the companion computer ever stops communicating, PX4 automatically failsafes — so the system is safe by design.
+The framework uses PX4 **external modes** for its custom autonomous flight behavior. External modes register through the companion computer and appear as selectable flight modes in QGroundControl alongside built-in modes. PX4 detects an unresponsive active mode and applies the vehicle's configured failsafe action; verify those settings and behavior before flight. See the [external-modes guide](general_docs/external_modes.md) for the mode and executor workflow.
 
 ## Jacob's Ladder Structure
 Within the project you'll find several pacakges, this README serves as a higher level overview of all the components involved in the project.
@@ -95,6 +95,7 @@ Useful environment variables:
 | `OPENCV_CUDA_ARCH` | `8.7` | Orin NX / Orin Nano / AGX Orin are all `sm_87`. Use `7.2` for Xavier. Listing only your arch roughly halves build time. |
 | `OPENCV_WITH_CUDNN` | `ON` | Set `OFF` if cmake fails to detect cuDNN. JetPack 6.2 ships cuDNN 9, which older OpenCV releases mis-detect. Nothing here needs it — YOLO runs inference through torch, not `cv2.dnn`. |
 | `OPENCV_BUILD_JOBS` | `nproc - 1` | Lower it if the build gets OOM-killed. |
+| `OPENCV_CMAKE_LOG_LEVEL` | `STATUS` | CMake message threshold. CI can use `WARNING` to hide feature-probe status output while retaining warnings and errors. |
 | `OPENCV_PYTHON_VENV` | repo `.venv` | Where the `cv2` bindings are installed. |
 | `OPENCV_INSTALL_PREFIX` | `/usr/local` | |
 

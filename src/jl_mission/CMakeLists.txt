@@ -17,7 +17,10 @@ find_package(jl_mission_interfaces REQUIRED)
 
 # The safety contract as plain C++ (Eigen only), so it is unit-tested without ROS
 add_library(setpoint_guard src/setpoint_guard.cpp)
-target_include_directories(setpoint_guard PUBLIC include ${EIGEN3_INCLUDE_DIR})
+target_include_directories(setpoint_guard PUBLIC include)
+# Eigen is an external dependency; its GCC/NEON warnings must not become
+# errors under this package's -Werror policy.
+target_include_directories(setpoint_guard SYSTEM PUBLIC ${EIGEN3_INCLUDE_DIR})
 
 add_executable(jl_mission src/main.cpp src/mission_mode.cpp)
 target_include_directories(jl_mission PRIVATE include)
