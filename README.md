@@ -153,6 +153,7 @@ START HERE:
 | [drogue_flight](src/drogue_flight) | TODO: In-Progress Porting for flying to a detected KC-130 drogue |
 | [example_autonomous_mode](src/example_autonomous_mode) | **Start here to write a new mode** -> A minimal, working External Mode (take off, hold, land) documented line by line and meant to be copied |
 | [jl_mission](src/jl_mission) | The one C++ external mode behind every mission file: checks and relays the Python mission runner's setpoints, owns arm/takeoff/land. Checked in SITL with `make sitl-test` |
+| [flights](flights) | **Fly the drone from a short Python script**, like a Crazyflie `MotionCommander` program (`drone.forward(1.5)`, `drone.turn_left(90)`, a `with` block that takes off and lands). Runs on `jl_blocks.fly` through the same `jl_mission` safety limits |
 | [precision_land](src/precision_land)  | ROS 2 External Modes that fly autonomous missions for object detection, trajectory planning, and landing
 | [oak_d_visual_odometry](src/oak_d_visual_odometry)  | ROS 2 nodes for OAK-D visual odometry using NVIDIA cuVSLAM, with optional PX4 `VehicleOdometry` output for flight. |
 | [px4-ros2-interface-lib](src/px4-ros2-interface-lib) | Should NOT be Altered : Use Given Branch -> ROS 2 <-> PX4 Bridge, allows us to create External Modes |

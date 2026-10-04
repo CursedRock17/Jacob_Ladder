@@ -13,11 +13,17 @@ source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../jl_env.sh"
 CONTAINER="${JL_CONTAINER:-jacob_ladder_sim}"
 IMAGE="${JL_IMAGE:-lucaswendland/jacob_ladder:latest}"
 
+# One --group-add per distinct gid: a machine with two GPUs has several card*
+# nodes, and a multi-line value in a single --group-add makes docker refuse to start.
+GPU_GROUPS=()
+for gid in $(stat -c %g /dev/dri/card* /dev/dri/renderD128 | sort -u); do
+  GPU_GROUPS+=(--group-add "$gid")
+done
+
 docker run -d --name "$CONTAINER" \
   --network host \
   --device /dev/dri \
-  --group-add "$(stat -c %g /dev/dri/card*)" \
-  --group-add "$(stat -c %g /dev/dri/renderD128)" \
+  "${GPU_GROUPS[@]}" \
   -e DISPLAY="${DISPLAY:-:0}" \
   -e LOCAL_USER_ID="$(id -u)" \
   -v /tmp/.X11-unix:/tmp/.X11-unix:ro \

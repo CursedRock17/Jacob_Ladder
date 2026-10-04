@@ -4,7 +4,8 @@
 //
 // RelayMode passes the Python mission_runner's setpoints to PX4, but only after
 // the SetpointGuard has checked them. MissionExecutor owns arm, takeoff and
-// land, which the runner requests over two services. See spec section 5.
+// land, which the runner requests over services (arm, takeoff, land). See spec
+// section 5.
 
 #include "jl_mission/debug_publishers.hpp"
 #include "jl_mission/setpoint_guard.hpp"
@@ -121,7 +122,14 @@ public:
 private:
   using TakeoffSrv = jl_mission_interfaces::srv::Takeoff;
   using LandSrv = std_srvs::srv::Trigger;
+  using ArmSrv = std_srvs::srv::Trigger;
 
+  void onArm(std::shared_ptr<rmw_request_id_t> header,
+             std::shared_ptr<ArmSrv::Request> request);
+  void finishArm(bool success, const std::string &message);
+  // Take over from the executor: make the relay mode the active one and start
+  // relaying. Returns false if the mission is no longer in charge.
+  bool takeOverRelay();
   void onTakeoff(std::shared_ptr<rmw_request_id_t> header,
                  std::shared_ptr<TakeoffSrv::Request> request);
   void onLand(std::shared_ptr<rmw_request_id_t> header,
@@ -139,10 +147,12 @@ private:
   float _takeoff_timeout_s{30.f};
 
   rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr _active_pub;
+  rclcpp::Service<ArmSrv>::SharedPtr _arm_srv;
   rclcpp::Service<TakeoffSrv>::SharedPtr _takeoff_srv;
   rclcpp::Service<LandSrv>::SharedPtr _land_srv;
   rclcpp::TimerBase::SharedPtr _climb_timer;
 
+  std::shared_ptr<rmw_request_id_t> _arm_request;
   std::shared_ptr<rmw_request_id_t> _takeoff_request;
   std::vector<std::shared_ptr<rmw_request_id_t>> _land_requests;
   Eigen::Vector3f _climb_target{Eigen::Vector3f::Zero()};

@@ -82,3 +82,50 @@ start_px4_aruco() {
   (cd "$logs/rootfs" && "$PX4_BUILD/bin/px4-param" set NAV_DLL_ACT 0) >> "$logs/commander.log" 2>&1  # no GCS in this test
   ros2 launch aruco_tracker front_camera_aruco.launch.py > "$logs/tracker.log" 2>&1 &
 }
+
+# Start the RGB-D demo world headless: Gazebo with rendering (the camera needs
+# it) loading gazebo/worlds/rgbd_demo.sdf, the x500_rgbd vehicle, PX4 attached
+# to it in standalone mode with the stock gz_x500 airframe (so nothing has to
+# be added to PX4-Autopilot), the agent, the translation node and the camera
+# bridge. $1: log dir. Returns 1 if Gazebo or PX4 never comes up. Callers must
+# `trap kill_flight EXIT` before calling it. GZ_GUI=1 opens the Gazebo window;
+# GZ_RENDER=x11 renders through $DISPLAY instead of EGL (needed when EGL cannot
+# open the GPU, which gives "eglInitialize failed").
+start_px4_rgbd() {
+  local logs="$1" world=rgbd_demo
+  mkdir -p "$logs/rootfs" && cp "$PX4_BUILD/rootfs/gz_env.sh" "$logs/rootfs/"
+  source "$PX4_BUILD/rootfs/gz_env.sh"
+  export GZ_SIM_RESOURCE_PATH="$GZ_SIM_RESOURCE_PATH:$JL_WS_ROOT/gazebo/models:$JL_WS_ROOT/gazebo/worlds"
+  export GZ_IP=127.0.0.1
+  if [ -n "${GZ_GUI:-}" ]; then
+    gz sim -r "$JL_WS_ROOT/gazebo/worlds/$world.sdf" > "$logs/gz.log" 2>&1 &
+  elif [ "${GZ_RENDER:-egl}" = x11 ]; then
+    gz sim -s -r "$JL_WS_ROOT/gazebo/worlds/$world.sdf" > "$logs/gz.log" 2>&1 &
+  else
+    gz sim -s -r --headless-rendering "$JL_WS_ROOT/gazebo/worlds/$world.sdf" > "$logs/gz.log" 2>&1 &
+  fi
+  for _ in $(seq 60); do
+    gz service -l 2>/dev/null | grep -q "/world/$world/create" && break; sleep 1
+  done
+  if ! gz service -l 2>/dev/null | grep -q "/world/$world/create"; then
+    echo "FAIL gazebo world $world did not start (see $logs/gz.log)"
+    grep -q "eglInitialize failed" "$logs/gz.log" &&
+      echo "hint: headless EGL rendering does not work on this GPU setup; rerun with GZ_RENDER=x11 to render through the X display instead"
+    return 1
+  fi
+  gz service -s "/world/$world/create" --reqtype gz.msgs.EntityFactory \
+    --reptype gz.msgs.Boolean --timeout 5000 \
+    --req "sdf_filename: \"$JL_WS_ROOT/gazebo/models/x500_rgbd/model.sdf\", name: \"x500_rgbd_0\"" \
+    >> "$logs/gz.log" 2>&1
+  PX4_GZ_STANDALONE=1 PX4_GZ_WORLD=$world PX4_GZ_MODEL_NAME=x500_rgbd_0 \
+    PX4_SIM_MODEL=gz_x500 \
+    "$PX4_BUILD/bin/px4" -d -w "$logs/rootfs" "$PX4_BUILD/etc" > "$logs/px4.log" 2>&1 &
+  MicroXRCEAgent udp4 -p 8888 > "$logs/agent.log" 2>&1 &
+  ros2 run translation_node translation_node_bin > "$logs/translation.log" 2>&1 &
+  for _ in $(seq 120); do grep -q "synchronized with time offset" "$logs/px4.log" && break; sleep 1; done
+  if ! grep -q "synchronized with time offset" "$logs/px4.log"; then
+    echo "FAIL PX4 did not start (see $logs/px4.log)"; return 1
+  fi
+  (cd "$logs/rootfs" && "$PX4_BUILD/bin/px4-param" set NAV_DLL_ACT 0) >> "$logs/commander.log" 2>&1  # no GCS in this test
+  ros2 launch "$JL_WS_ROOT/gazebo/launch/rgbd_bridge.launch.py" > "$logs/bridge.log" 2>&1 &
+}

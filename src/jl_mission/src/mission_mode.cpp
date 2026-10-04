@@ -97,7 +97,11 @@ std::optional<float> RelayMode::altitudeAmsl() const {
 }
 
 bool RelayMode::landed() const {
-  return _land_detected->lastValid() && _land_detected->landed();
+  // PX4 publishes land detection on change and otherwise only once a second, so
+  // the default 500 ms freshness window would say "not landed" about half the
+  // time while the drone sits on the ground.
+  return _land_detected->lastValid(std::chrono::seconds(3)) &&
+         _land_detected->landed();
 }
 
 void RelayMode::onActivate() {
@@ -311,6 +315,11 @@ MissionExecutor::MissionExecutor(rclcpp::Node &node, RelayMode &mode)
   const std::string prefix = "/jl/" + mode.missionName();
   _active_pub = node.create_publisher<std_msgs::msg::Bool>(
       prefix + "/active", rclcpp::QoS(1).transient_local());
+  _arm_srv = node.create_service<ArmSrv>(
+      prefix + "/arm", [this](std::shared_ptr<rmw_request_id_t> header,
+                              std::shared_ptr<ArmSrv::Request> request) {
+        onArm(header, request);
+      });
   _takeoff_srv = node.create_service<TakeoffSrv>(
       prefix + "/takeoff",
       [this](std::shared_ptr<rmw_request_id_t> header,
@@ -351,6 +360,7 @@ void MissionExecutor::onDeactivate(DeactivateReason reason) {
               _mode.missionName().c_str(), why.c_str());
   _takeoff_aborted = true;
   _landing = false;
+  finishArm(false, why);
   finishTakeoff(false, why);
   finishLand(false, why);
 }
@@ -365,6 +375,78 @@ void MissionExecutor::onScheduledModeResult(px4_ros2::Result result) {
   if (result != px4_ros2::Result::Success) {
     landNow(std::string("relay ended: ") + resultToString(result));
   }
+}
+
+bool MissionExecutor::takeOverRelay() {
+  scheduleMode(ownedMode().id(), [this](px4_ros2::Result result) {
+    onScheduledModeResult(result);
+  });
+  if (isInCharge() && !_landing) {
+    _mode.startRelay();
+    return true;
+  }
+  return false;
+}
+
+// Arm and start relaying, but do not take off: the script's own setpoints do
+// that. Until the reply, the relay is not running, so setpoints are ignored.
+void MissionExecutor::onArm(std::shared_ptr<rmw_request_id_t> header,
+                            std::shared_ptr<ArmSrv::Request> /*request*/) {
+  auto reply = [this, header](bool success, const std::string &message) {
+    ArmSrv::Response response;
+    response.success = success;
+    response.message = message;
+    _arm_srv->send_response(*header, response);
+  };
+  if (!isInCharge()) {
+    reply(false, "mission is not active; select it in QGC first");
+    return;
+  }
+  if (_landing) {
+    reply(false, "landing in progress");
+    return;
+  }
+  if (_arm_request || _takeoff_request) {
+    reply(false, "arm or takeoff already in progress");
+    return;
+  }
+  if (isArmed()) {
+    // Already armed (e.g. by the pilot, or a repeated request): just take over.
+    if (takeOverRelay()) {
+      reply(true, "already armed; relaying");
+    } else {
+      reply(false, "could not take over: mission no longer in charge");
+    }
+    return;
+  }
+
+  _mode.reset();
+  _arm_request = header;
+  arm([this](px4_ros2::Result result) {
+    if (!_arm_request) {
+      return; // cancelled by a land request or a deactivation
+    }
+    if (result != px4_ros2::Result::Success) {
+      finishArm(false, std::string("arm failed: ") + resultToString(result));
+    } else if (takeOverRelay()) {
+      finishArm(true, "armed; relaying");
+    } else {
+      finishArm(false, "could not take over: mission no longer in charge");
+    }
+  });
+}
+
+void MissionExecutor::finishArm(bool success, const std::string &message) {
+  if (!_arm_request) {
+    return;
+  }
+  ArmSrv::Response response;
+  response.success = success;
+  response.message = message;
+  _arm_srv->send_response(*_arm_request, response);
+  _arm_request.reset();
+  RCLCPP_INFO(_node.get_logger(), "Arm %s: %s", success ? "done" : "failed",
+              message.c_str());
 }
 
 void MissionExecutor::onTakeoff(std::shared_ptr<rmw_request_id_t> header,
@@ -500,6 +582,7 @@ void MissionExecutor::onLand(std::shared_ptr<rmw_request_id_t> header,
     return;
   }
   _land_requests.push_back(header);
+  finishArm(false, "cancelled by land");
   if (_takeoff_request) {
     finishTakeoff(false, "cancelled by land");
     _climb_timer.reset();

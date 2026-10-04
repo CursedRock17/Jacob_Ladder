@@ -8,6 +8,9 @@ set -e
 "$HERE/sitl_mission.sh" "$ROOT/missions/takeoff_hold_land.yaml" \
   --expect "takeoff hold land" --finished
 "$HERE/sitl_runner_smoke.sh"
+"$HERE/sitl_script.sh" "$ROOT/test/fly_smoke.py" FlySmoke
+"$HERE/sitl_rgbd.sh"
+"$HERE/sitl_script.sh" "$ROOT/test/fly_smoke.py" FlySmoke --rgbd
 "$HERE/sitl_mission.sh" "$ROOT/missions/aruco_standoff.yaml" --world aruco \
   --expect "takeoff search track" --camera-standoff "0 0 3"
 echo "== all L3 flights passed =="
