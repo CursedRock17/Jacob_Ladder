@@ -5,6 +5,8 @@
 #   make          format (if configured) + build
 #   make build    build only
 #   make format   astyle only
+#   make format-cpp       clang-format the example and planner
+#   make check-cpp-format verify their formatting without editing
 #   make clean    remove build/ install/ log/
 
 # Build against the CUDA-enabled OpenCV in /usr/local rather than whichever
@@ -19,9 +21,7 @@ OPENCV_DIR ?= /usr/local/lib/cmake/opencv4
 # Quote the patterns: unquoted, the shell expands them before astyle sees the
 # `*.cpp,*.hpp` comma syntax and nothing matches.
 #
-# src/example_autonomous_mode is deliberately absent from this list: it carries
-# its own .clang-format and is formatted with clang-format instead, so astyle
-# must not touch it.
+# The example and DroneSmoothPlanner.cpp use clang-format instead of astyle.
 ASTYLE_OPTIONS ?= astylerc
 ASTYLE_TARGETS := "src/aruco_tracker/*.cpp,*.hpp" "src/precision_land/*.cpp,*.hpp"
 
@@ -33,6 +33,19 @@ format:
 	else \
 		echo "make: skipping astyle -- '$(ASTYLE_OPTIONS)' not found"; \
 	fi
+
+# clang-format must already be installed. Override CXX_FORMAT_FILES to format
+# other first-party files; leave upstream submodules out of the list.
+CXX_FORMAT_FILES ?= src/example_autonomous_mode/ExampleAutonomousMode.cpp \
+                   src/example_autonomous_mode/ExampleAutonomousMode.hpp \
+                   src/drogue_flight/DroneSmoothPlanner.cpp
+CLANG_FORMAT ?= clang-format
+
+format-cpp:
+	$(CLANG_FORMAT) -i $(CXX_FORMAT_FILES)
+
+check-cpp-format:
+	$(CLANG_FORMAT) --dry-run --Werror $(CXX_FORMAT_FILES)
 
 build:
 	@colcon build --cmake-args -DOpenCV_DIR=$(OPENCV_DIR)
@@ -82,4 +95,4 @@ sitl-mission:
 	sleep 3
 	docker exec --user user -w $(CURDIR) $(SIM_CONTAINER) bash -c 'source /opt/ros/humble/setup.bash && source install/setup.bash && test/sitl_mission.sh $(MISSION) $(ARGS)'
 
-.PHONY: all format build clean check sitl-test sitl-mission
+.PHONY: all format format-cpp check-cpp-format build clean check sitl-test sitl-mission

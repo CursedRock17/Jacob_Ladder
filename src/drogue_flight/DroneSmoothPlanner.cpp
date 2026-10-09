@@ -471,7 +471,8 @@ void DroneSmoothPlannerExecutor::runState(State state,
 
 } // namespace drogue_flight
 
-// NodeWithModeExecutor wires the executor + mode together and registers with PX4
+// NodeWithModeExecutor wires the executor + mode together and registers with
+// PX4
 //
 // Registration is a single request/reply round-trip with a 1 s timeout, made
 // from the NodeWithModeExecutor *constructor*, and the constructor throws if
@@ -486,49 +487,47 @@ void DroneSmoothPlannerExecutor::runState(State state,
 // keep retrying. The library's own integration tests use waitForFMU the same
 // way. Retries continue for as long as ROS is up, because a mode that fails to
 // register is useless and there is nothing else for this process to do.
-int main(int argc, char* argv[])
-{
-	using namespace std::chrono_literals;
+int main(int argc, char *argv[]) {
+  using namespace std::chrono_literals;
 
-	rclcpp::init(argc, argv);
+  rclcpp::init(argc, argv);
 
-	// waitForFMU needs a node, and it must not be the mode node itself --
-	// constructing that is what triggers registration.
-	{
-		auto startup_node = std::make_shared<rclcpp::Node>("drogue_flight_startup");
+  // waitForFMU needs a node, and it must not be the mode node itself --
+  // constructing that is what triggers registration.
+  {
+    auto startup_node = std::make_shared<rclcpp::Node>("drogue_flight_startup");
 
-		if (!px4_ros2::waitForFMU(*startup_node, 60s)) {
-			RCLCPP_WARN(
-				startup_node->get_logger(),
-				"No FMU heartbeat after 60s -- is dds_agent running and the TELEM2 link up? "
-				"Continuing to retry registration anyway.");
-		}
-	}
+    if (!px4_ros2::waitForFMU(*startup_node, 60s)) {
+      RCLCPP_WARN(startup_node->get_logger(),
+                  "No FMU heartbeat after 60s -- is dds_agent running and the "
+                  "TELEM2 link up? "
+                  "Continuing to retry registration anyway.");
+    }
+  }
 
-	auto retry_delay = 2s;
+  auto retry_delay = 2s;
 
-	while (rclcpp::ok()) {
-		try {
-			auto node = std::make_shared<px4_ros2::NodeWithModeExecutor<
-				drogue_flight::DroneSmoothPlannerExecutor, drogue_flight::DroneSmoothPlanner>>(
-				drogue_flight::kDroneSmoothPlannerModeName,
-				drogue_flight::kDroneSmoothPlannerDebugOutput);
+  while (rclcpp::ok()) {
+    try {
+      auto node = std::make_shared<px4_ros2::NodeWithModeExecutor<
+          drogue_flight::DroneSmoothPlannerExecutor,
+          drogue_flight::DroneSmoothPlanner>>(
+          drogue_flight::kDroneSmoothPlannerModeName,
+          drogue_flight::kDroneSmoothPlannerDebugOutput);
 
-			RCLCPP_INFO(
-				node->get_logger(), "Registered '%s' with PX4",
-				drogue_flight::kDroneSmoothPlannerModeName);
-			rclcpp::spin(node);
-			break;
+      RCLCPP_INFO(node->get_logger(), "Registered '%s' with PX4",
+                  drogue_flight::kDroneSmoothPlannerModeName);
+      rclcpp::spin(node);
+      break;
 
-		} catch (const std::runtime_error& e) {
-			RCLCPP_WARN(
-				rclcpp::get_logger("drogue_flight"),
-				"Mode registration failed (%s); retrying in %lds",
-				e.what(), static_cast<long>(retry_delay.count()));
-			rclcpp::sleep_for(retry_delay);
-		}
-	}
+    } catch (const std::runtime_error &e) {
+      RCLCPP_WARN(rclcpp::get_logger("drogue_flight"),
+                  "Mode registration failed (%s); retrying in %lds", e.what(),
+                  static_cast<long>(retry_delay.count()));
+      rclcpp::sleep_for(retry_delay);
+    }
+  }
 
-	rclcpp::shutdown();
-	return 0;
+  rclcpp::shutdown();
+  return 0;
 }

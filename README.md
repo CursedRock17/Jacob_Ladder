@@ -4,7 +4,7 @@ Each of the subsections have their own respective READMEs and docs for full expl
 
 Jacob's Ladder is a modular, system-agnostic UAV command-and-control (C2) framework built on **ROS 2 Humble** and **PX4**. It lets you write autonomous drone missions entirely in ROS 2 — the same code runs in Gazebo simulation on your laptop and on real hardware in the field, with no rewrites needed.
 
-The framework uses PX4 **external modes** for its custom autonomous flight behavior. External modes register through the companion computer and appear as selectable flight modes in QGroundControl alongside built-in modes. PX4 detects an unresponsive active mode and applies the vehicle's configured failsafe action; verify those settings and behavior before flight. See the [external-modes guide](general_docs/external_modes.md) for the mode and executor workflow.
+The framework uses PX4 **external modes** for its custom autonomous flight behavior. External modes register through the companion computer and appear as selectable flight modes in QGroundControl alongside built-in modes. See the [external-modes guide](general_docs/external_modes.md) for the mode and executor workflow, or [example_autonomous_mode](src/example_autonomous_mode/README.md) for a working implementation.
 
 ## Jacob's Ladder Structure
 Within the project you'll find several pacakges, this README serves as a higher level overview of all the components involved in the project.
