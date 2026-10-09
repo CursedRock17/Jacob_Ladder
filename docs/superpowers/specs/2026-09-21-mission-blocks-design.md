@@ -1,3 +1,7 @@
+> **Superseded.** This describes the YAML mission-blocks design (`jl_blocks`), which has been
+> replaced by missions written as Python functions: see [`src/jl_flight`](../../../src/jl_flight/README.md).
+> Kept as a record of the design history and its findings.
+
 # Mission blocks: compose autonomous missions from reusable blocks
 
 Date: 2026-09-21

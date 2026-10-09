@@ -1,3 +1,7 @@
+> **Superseded.** This describes the YAML mission-blocks design (`jl_blocks`), which has been
+> replaced by missions written as Python functions: see [`src/jl_flight`](../../../src/jl_flight/README.md).
+> Kept as a record of the design history and its findings.
+
 # Mission Blocks Phase 1: `jl_blocks` core, checker CLI and CI — Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.

@@ -1,17 +1,21 @@
 #!/bin/bash
-# Fly one mission file in Gazebo SITL, with the GUI, from a single terminal.
+# Fly one mission (missions/*.py) in Gazebo SITL, with the GUI, from a single terminal.
 #
-#   ./launch_scripts/sim_mission.sh [MISSION.yaml] [--expect "step names"] [--no-start]
+#   ./launch_scripts/sim_mission.sh MISSION.py [--world default|apriltag] [--no-start]
 #
-#   MISSION.yaml   default: missions/takeoff_hold_land.yaml
-#   --expect       steps that must start, in order (default: "takeoff hold land")
-#   --no-start     do not select the mission for you; pick it in QGC instead
+#   --world      default: PX4's gz_x500 in an empty world (airframe generic).
+#                apriltag: a wall 6 m ahead with a tag36h11 id 0 tag on it, x500_rgbd drone.
+#                rgbd: obstacles ahead for the RGB-D camera, x500_rgbd drone.
+#                aruco: ArUco tags on the ground and on a post, x500_dual_cam drone.
+#   --no-start   do not select the mission for you; pick it in QGC instead
 #
 # Run it on the host: it re-runs itself inside the jacob_ladder_sim container
 # (./docker/run_sim_container.sh), which needs PX4 and the workspace built.
-# PX4, the DDS agent, the translation node and the mission runner run as
-# background jobs of this one shell; their logs are in the directory it prints.
-# This is test/sitl_mission.sh with the Gazebo window turned on.
+# Gazebo, PX4, the DDS agent and the translation node run as background jobs of
+# this shell, and so does jl_flight's mission.launch.py: jl_mission, the helpers
+# the mission declares, and the mission. The mission's own output (what it is
+# doing, and any error) is shown here; everything else goes to the logs folder it
+# prints. Ctrl+C or Enter stops it all.
 source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../jl_env.sh"
 
 if [ ! -f /.dockerenv ]; then
@@ -21,52 +25,44 @@ fi
 
 source "$JL_WS_ROOT/test/sitl_common.sh"
 
-MISSION="$JL_WS_ROOT/missions/takeoff_hold_land.yaml"; EXPECT="takeoff hold land"; START=true
+usage() { sed -n '2,18p' "$0" | sed 's/^# \{0,1\}//'; exit 2; }
+[ $# -ge 1 ] || usage
+MISSION="$(readlink -f "$1")"; shift
+WORLD=default; START=true
 while [ $# -gt 0 ]; do
   case "$1" in
-    --expect) EXPECT="$2"; shift 2 ;;
+    --world) [ $# -ge 2 ] || usage; WORLD="$2"; shift 2 ;;
     --no-start) START=false; shift ;;
-    -*) echo "unknown option: $1"; exit 2 ;;
-    *) MISSION="$(readlink -f "$1")"; shift ;;
+    *) echo "unknown option: $1"; usage ;;
   esac
 done
+read -r GZ_WORLD AIRFRAME < <(world_setup "$WORLD") || { echo "unknown world: $WORLD"; usage; }
 
-ros2 run jl_blocks jl_blocks check "$MISSION" || { echo "FAIL mission file $MISSION"; exit 1; }
-NAME=$(python3 -c "import sys, yaml; print(yaml.safe_load(open(sys.argv[1]))['name'])" "$MISSION")
+python3 -m jl_flight check "$MISSION" --airframe "$AIRFRAME" || exit 1
+NAME=$(python3 -m jl_flight name "$MISSION")
 trap kill_flight EXIT
 kill_flight   # nothing from an earlier run may be left over
 
 logs=$(mktemp -d)
-echo "== $NAME: starting Gazebo + PX4 (logs: $logs) =="
-mkdir -p "$logs/rootfs" && cp "$PX4_BUILD/rootfs/gz_env.sh" "$logs/rootfs/"
-# No HEADLESS here: that is what opens the Gazebo window.
-PX4_SIM_MODEL=gz_x500 GZ_IP=127.0.0.1 \
-  "$PX4_BUILD/bin/px4" -d -w "$logs/rootfs" "$PX4_BUILD/etc" > "$logs/px4.log" 2>&1 &
-MicroXRCEAgent udp4 -p 8888 > "$logs/agent.log" 2>&1 &
-ros2 run translation_node translation_node_bin > "$logs/translation.log" 2>&1 &
-for _ in $(seq 120); do grep -q "synchronized with time offset" "$logs/px4.log" && break; sleep 1; done
-grep -q "synchronized with time offset" "$logs/px4.log" || { echo "FAIL PX4 did not start (see $logs/px4.log)"; exit 1; }
-(cd "$logs/rootfs" && "$PX4_BUILD/bin/px4-param" set NAV_DLL_ACT 0) >> "$logs/commander.log" 2>&1  # sim: no data-link failsafe
-
-echo "== starting the mission runner =="
-ros2 launch jl_blocks mission.launch.py mission_file:="$MISSION" > "$logs/launch.log" 2>&1 &
-for _ in $(seq 60); do grep -q "Registered '$NAME'" "$logs/launch.log" && break; sleep 1; done
-grep -q "Registered '$NAME'" "$logs/launch.log" || { echo "FAIL $NAME never registered with PX4 (see $logs/launch.log)"; exit 1; }
-echo "== $NAME is registered with PX4 =="
-
-ros2 run jl_blocks mission_watch --ros-args -p mission_name:="$NAME" -p expect:="$EXPECT" \
-  -p finished:=true -p timeout_s:=300 > "$logs/watch.log" 2>&1 &
-watch=$!
-sleep 3
-if $START; then
-  echo "== selecting $NAME (watch the Gazebo window) =="
-  (cd "$logs/rootfs" && "$PX4_BUILD/bin/px4-commander" mode ext1) >> "$logs/commander.log" 2>&1
+echo "== $NAME: starting Gazebo ($WORLD) + PX4 (logs: $logs) =="
+if [ "$WORLD" = default ]; then
+  GZ_GUI=1 start_px4 "$logs" || { echo "logs: $logs"; exit 1; }
 else
-  echo "== select $NAME in QGC (or: px4-commander mode ext1) =="
+  GZ_GUI=1 start_px4_world "$logs" "$GZ_WORLD" "$AIRFRAME" || { echo "logs: $logs"; exit 1; }
 fi
 
-wait $watch; rc=$?
-cat "$logs/watch.log"
-echo "logs: $logs"
-read -r -p "Press Enter to close the simulation... "
-exit $rc
+echo "== starting $NAME =="
+ros2 launch jl_flight mission.launch.py mission:="$MISSION" airframe:="$AIRFRAME" > "$logs/launch.log" 2>&1 &
+wait_mode_ready "$logs/launch.log" "$NAME" || exit 1
+# Show what the mission says as it flies.
+tail -n +1 -f "$logs/launch.log" | grep --line-buffered -E "event: |Waiting for|jl_flight: |Traceback|Error" \
+  | sed -u -E 's/.*\]: (event: )?/  /' &
+
+if $START; then
+  for _ in $(seq 30); do grep -q "Waiting for '$NAME'" "$logs/launch.log" && break; sleep 1; done
+  echo "== selecting $NAME (watch the Gazebo window) =="
+  select_mission "$logs" "$NAME"
+else
+  echo "== select $NAME in QGC =="
+fi
+read -r -p "Press Enter to stop the simulation... "

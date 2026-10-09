@@ -3,7 +3,7 @@
 <package format="3">
   <name>jl_mission_interfaces</name>
   <version>0.1.0</version>
-  <description>Service definitions between the jl_blocks mission runner and the jl_mission external mode</description>
+  <description>Service definitions between a jl_flight mission and the jl_mission external mode</description>
   <maintainer email="mtglucas1@gmail.com">Lucas Wendland</maintainer>
   <license>BSD-3-Clause</license>
 

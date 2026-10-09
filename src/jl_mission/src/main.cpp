@@ -1,4 +1,4 @@
-// jl_mission entry point. One process per mission file: the mission's name
+// jl_mission entry point. One process per mission: the mission's name
 // (as shown in QGC) comes from the mission_name parameter.
 //
 // Registration is retried the same way TakeoffHold does it: wait for the FMU,
@@ -6,6 +6,7 @@
 
 #include "jl_mission/mission_mode.hpp"
 
+#include <px4_msgs/msg/vehicle_status.hpp>
 #include <px4_ros2/components/node_with_mode.hpp>
 #include <px4_ros2/components/wait_for_fmu.hpp>
 #include <rclcpp/exceptions/exceptions.hpp>
@@ -36,8 +37,15 @@ int main(int argc, char *argv[]) {
       auto node = std::make_shared<px4_ros2::NodeWithModeExecutor<
           jl_mission::MissionExecutor, jl_mission::RelayMode>>("jl_mission",
                                                                true);
-      RCLCPP_INFO(node->get_logger(), "Registered '%s' with PX4",
-                  node->getMode().missionName().c_str());
+      // Which external-mode slot PX4 gave us (`commander mode extN`). Not
+      // always 1: when PX4 answers a registration late, px4-ros2 resends it,
+      // PX4 registers the name twice, and the slot we listen on may be the
+      // second one.
+      const int slot = node->getMode().id() -
+                       px4_msgs::msg::VehicleStatus::NAVIGATION_STATE_EXTERNAL1 +
+                       1;
+      RCLCPP_INFO(node->get_logger(), "Registered '%s' with PX4 (mode ext%d)",
+                  node->getMode().missionName().c_str(), slot);
       rclcpp::spin(node);
       break;
     } catch (const rclcpp::exceptions::InvalidParameterTypeException &e) {

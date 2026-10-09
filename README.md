@@ -152,8 +152,8 @@ START HERE:
 | [aruco_tracker](src/aruco_tracker) | ROS 2 Wrapper for OpenCV detection of an ArUco Marker |
 | [drogue_flight](src/drogue_flight) | TODO: In-Progress Porting for flying to a detected KC-130 drogue |
 | [example_autonomous_mode](src/example_autonomous_mode) | **Start here to write a new mode** -> A minimal, working External Mode (take off, hold, land) documented line by line and meant to be copied |
-| [jl_mission](src/jl_mission) | The one C++ external mode behind every mission file: checks and relays the Python mission runner's setpoints, owns arm/takeoff/land. Checked in SITL with `make sitl-test` |
-| [flights](flights) | **Fly the drone from a short Python script**, like a Crazyflie `MotionCommander` program (`drone.forward(1.5)`, `drone.turn_left(90)`, a `with` block that takes off and lands). Runs on `jl_blocks.fly` through the same `jl_mission` safety limits |
+| [jl_flight](src/jl_flight) | **Start here to write a mission** -> missions are plain Python functions (`@mission("Name")`, then `drone.take_off()`, `drone.approach(TAG, standoff=1.5)`, ...), built from reusable skills and declared perception (AprilTag, ArUco, the YOLO drogue). The missions themselves live in [missions/](missions) |
+| [jl_mission](src/jl_mission) | The one C++ external mode behind every mission: checks and relays the mission's setpoints, owns arm/takeoff/land. Checked in SITL with `make sitl-test` |
 | [precision_land](src/precision_land)  | ROS 2 External Modes that fly autonomous missions for object detection, trajectory planning, and landing
 | [oak_d_visual_odometry](src/oak_d_visual_odometry)  | ROS 2 nodes for OAK-D visual odometry using NVIDIA cuVSLAM, with optional PX4 `VehicleOdometry` output for flight. |
 | [px4-ros2-interface-lib](src/px4-ros2-interface-lib) | Should NOT be Altered : Use Given Branch -> ROS 2 <-> PX4 Bridge, allows us to create External Modes |
@@ -168,14 +168,70 @@ Not a ROS 2 package, but it runs on the vehicle:
 |---|---|
 | [battery_monitor](battery_monitor) | Watches pack voltage on the INA238 and alerts at configurable land / min thresholds. Runs as a systemd service, independent of ROS 2. |
 
+## Missions
+
+A mission is a Python function in [`missions/`](missions):
+
+```python
+from jl_flight import AprilTag, mission
+
+TAG = AprilTag(id=0, size=0.30)
+
+@mission("LandBeforeAprilTag", needs=[TAG])
+def land_before_apriltag(drone):
+    drone.take_off(1.5)
+    drone.search(TAG, timeout=30)
+    drone.approach(TAG, standoff=1.5, timeout=60)
+    drone.hover(2)
+    drone.land()
+```
+
+The name is what QGC shows. `needs` declares what the mission looks for, and whoever runs it
+(the simulator, the tests, the drone's boot service) starts the matching tracker. Leaving the
+function, normally or by an exception, lands the drone. See [src/jl_flight](src/jl_flight) for the
+commands, skills, perception and airframes.
+
+| Mission | What it does |
+|---|---|
+| `takeoff_hold_land.py` | Take off, hover 5 s, land |
+| `square.py`, `hover_5s.py` | Examples: relative moves, and a hand-written setpoint loop |
+| `land_before_apriltag.py` | Fly to 1.5 m short of an AprilTag on a wall, facing it, and land there |
+| `drogue_approach.py` | Close to 3 m behind the refuelling drogue (YOLO) and hold station: drogue_flight's `DroneSmoothPlanner` in Python |
+| `apriltag_approach.py` | The same with an AprilTag standing in for the drogue (the simulator) |
+| `aruco_standoff.py`, `track_moving_aruco.py` | The same with ArUco tags, the second with a PID controller |
+
+Each mission spells out its own steps, so the file you read is the flight you get. The approach
+missions assume the target is in the camera's view after takeoff, and land if they lose it.
+
+### Watch one in the simulator
+
+```bash
+./launch_scripts/sim_mission.sh missions/apriltag_approach.py --world apriltag
+```
+
+`--world` picks the scene and the drone: `default` (empty, plain x500), `apriltag` (a tag on a wall,
+x500 with a RealSense-style RGB-D camera), `rgbd` (obstacles for the depth camera), or `aruco`
+(ArUco tags, x500 with front and downward cameras). The mission is selected for you
+(`--no-start` leaves that to QGC). Its progress prints in the terminal; Enter stops everything.
+
+To check one headless, with an assertion on where it ends up:
+
+```bash
+make sitl-mission MISSION=missions/land_before_apriltag.py \
+  ARGS='--world apriltag --landed-at "0 5.898" --ring 1.5 --tolerance 0.3'
+```
+
+Add `GZ_RENDER=x11` before `make` where headless EGL rendering fails (`eglInitialize failed`).
+
 ## Deploying a mission
 
 On the drone (over its hotspot):
 
-1. Add the mission file to `config/flight.yaml` (it must live in `missions/`), commit, push.
+1. List the mission in [`config/flight.yaml`](config/flight.yaml) (it must live in `missions/`),
+   set `airframe:` to this aircraft, commit, push.
 2. On the Jetson: `./deploy.sh`. It refuses while armed or with local changes,
-   pulls, checks every mission, builds the required packages, enables one
-   `jl_mission@<file>` service per mission, and ends with the readiness report.
+   pulls, checks every mission, builds the required packages (including each mission's
+   trackers), enables one `jl_mission@<file>` service per mission, and ends with the readiness report.
 3. Before each flight: `./deploy.sh --check`.
 
 ```text
@@ -184,6 +240,9 @@ On the drone (over its hotspot):
 ✓ VIO publishing                   /fmu/in/vehicle_visual_odometry  30 Hz
 ✓ Registered in PX4                TakeoffHoldLand
 ```
+
+Each mission service runs the mission's trackers alongside it. After a mission ends it waits for
+its mode to be selected again, so it never flies twice on one selection.
 
 Deployment stops and disables removed mission instances and unlisted helpers
 (`vio`, `aruco_tracker`, `battery_monitor`); it leaves `dds_agent`,
@@ -196,8 +255,19 @@ which works without ROS or systemd and does not pull, build, or change services
 (Python with PyYAML is required).
 The preview lists how old instances would be discovered; it does not inspect
 the drone's installed services or verify readiness.
-Try the mission in SITL with
-`make sitl-mission MISSION=missions/takeoff_hold_land.yaml ARGS='--expect "takeoff hold land" --finished'`.
+
+### Things to know about camera missions
+
+- Standoffs are measured along the drone's line to the target, not along the wall's normal, so
+  "1.5 m in front" means 1.5 m away in the direction the drone came from. Start roughly facing it.
+- The camera's mount (offset and pitch) comes from the airframe. It must match the aircraft, or
+  every target lands in the wrong place by that much.
+- Camera latency matters: detections lag the drone. Approaches therefore finish only once the
+  drone has settled, when latency no longer biases the readings. A heavy stream sharing a bridge
+  with the camera once delayed images by about a second; the simulated camera now uses one bridge
+  process per stream and leaves the point cloud off unless asked for.
+- In the simulator PX4's heading reads about 6 degrees off, which swings camera-derived positions
+  sideways (about 0.4 m at 3 m). That is the sim world's magnetic field, not the missions.
 
 ## What Can It Do?
 
@@ -439,6 +509,7 @@ Select the precision landing mode from the QGroundControl dropdown:
 | `offboard_blank.sh` | `precision_land/blank_mode.launch.py` | `gz_x500_dual_cam` | Empty external-mode template — registers with PX4 and does nothing, for when you already know the framework |
 | `moving_launch.sh` | `precision_land/track_follow.launch.py` | Custom moving platform world | Track and land on a moving ArUco platform (uses the `v1_16_tracker` aruco launch) |
 | `real_launch.sh` | *(edit before use)* | Real hardware | DDS agent + RViz shell for Jetson/Pixhawk flight testing — all mode commands are commented out so you can uncomment the one you want |
+| `sim_mission.sh` | any mission in `missions/` | `--world`: empty, `apriltag`, `rgbd` or `aruco` | **The way to run a Python mission.** One terminal, nothing to edit, see [Missions](#missions) |
 | `aruco_smooth_planner.sh` | `drogue_flight/autonomous_smooth_flight.launch.py` | `aruco_dual_ids` (loaded from `gazebo/`) | `DroneSmoothPlanner` chasing an ArUco tag in place of the drogue. Uses the `jacob_ladder_sim` container, see [the walkthrough](src/drogue_flight/docs/aruco_sitl.md) |
 | `fake_drogue.sh` | *(no flight mode)* | Real hardware | Drogue camera feed sanity check — runs the DDS agent and `ros2 topic hz` on the camera topic |
 
@@ -494,8 +565,8 @@ Different configurations of physical drones may require different PX4 Parameter 
 any and all tested forms of parameters are labelled in the [`config/params`](config/params) directory.
 
 ### Checking your work
-`make check` lints, type-checks and unit-tests the mission blocks in
-[`src/jl_blocks`](src/jl_blocks), and checks every mission file in `missions/`.
+`make check` lints, type-checks and unit-tests [`src/jl_flight`](src/jl_flight), tests
+`deploy.sh` against stubs, and checks every mission in `missions/`.
 It needs only [uv](https://docs.astral.sh/uv/) (no ROS), takes a few seconds, and
 runs automatically on every push through GitHub Actions.
 
@@ -503,7 +574,7 @@ runs automatically on every push through GitHub Actions.
 
 1. **Manual flight first** — Get the drone flying reliably in Stabilized and Position modes before running any autonomy
 2. **Networked sim test** — Run PX4 SITL on your PC and the ROS nodes on the Jetson over the same network to verify communication
-3. **Props-off test** — Run your flight mode with propellers removed and verify PX4 receives setpoints via QGroundControl
+3. **Props-off test** — Run the mission as it would fly, with its setpoints printed (`ros2 launch jl_flight mission.launch.py mission:=missions/<file>.py report:=0.5`), select it in QGC, and check it arms and the motors respond. Without props it cannot climb, so the run ends at the takeoff. See [On the real drone](src/jl_flight/README.md#on-the-real-drone)
 4. **Verify topics** — Confirm PX4 topics are visible: `ros2 topic list` should show `/fmu/out/vehicle_odometry`, `/fmu/out/vehicle_status`, etc.
 
 ## Additional Resources

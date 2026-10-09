@@ -1,5 +1,5 @@
 [Unit]
-Description=Mission %i (jl_mission + mission_runner, from missions/%i.yaml)
+Description=Mission %i (jl_mission + the mission in missions/%i.py)
 Documentation=file://@JL_WS_ROOT@/config/flight.yaml
 # Needs the DDS link to reach PX4, but not the network: the airframe flies
 # with no WiFi. Same ordering as takeoff_hold.service.

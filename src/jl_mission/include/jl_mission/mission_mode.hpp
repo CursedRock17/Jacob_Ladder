@@ -1,10 +1,10 @@
 #pragma once
 
-// jl_mission: the one C++ external mode behind every mission file.
+// jl_mission: the one C++ external mode behind every mission.
 //
-// RelayMode passes the Python mission_runner's setpoints to PX4, but only after
+// RelayMode passes the Python mission's setpoints to PX4, but only after
 // the SetpointGuard has checked them. MissionExecutor owns arm, takeoff and
-// land, which the runner requests over services (arm, takeoff, land). See spec
+// land, which the mission requests over services (arm, takeoff, land). See spec
 // section 5.
 
 #include "jl_mission/debug_publishers.hpp"

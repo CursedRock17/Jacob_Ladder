@@ -30,7 +30,7 @@ expect_in() {
 run_silence_flight() {
   echo "== flight: silence =="
   local logs; logs=$(mktemp -d)
-  start_px4 "$logs"
+  start_px4 "$logs" || { echo "logs: $logs"; return 1; }
 
   ros2 run jl_mission jl_mission --ros-args -p mission_name:=$NAME > "$logs/mode.log" 2>&1 &
   for _ in $(seq 60); do grep -q "Registered '$NAME'" "$logs/mode.log" && break; sleep 1; done
@@ -66,7 +66,7 @@ run_silence_flight() {
 run_land_flight() {
   echo "== flight: land =="
   local logs; logs=$(mktemp -d)
-  start_px4 "$logs"
+  start_px4 "$logs" || { echo "logs: $logs"; return 1; }
 
   ros2 run jl_mission jl_mission --ros-args -p mission_name:=$NAME > "$logs/mode.log" 2>&1 &
   for _ in $(seq 60); do grep -q "Registered '$NAME'" "$logs/mode.log" && break; sleep 1; done
@@ -116,7 +116,7 @@ run_land_flight() {
 run_takeover_flight() {
   echo "== flight: takeover =="
   local logs; logs=$(mktemp -d)
-  start_px4 "$logs"
+  start_px4 "$logs" || { echo "logs: $logs"; return 1; }
 
   ros2 run jl_mission jl_mission --ros-args -p mission_name:=$NAME > "$logs/mode.log" 2>&1 &
   for _ in $(seq 60); do grep -q "Registered '$NAME'" "$logs/mode.log" && break; sleep 1; done

@@ -87,7 +87,7 @@ def test_a_dirty_tree_refuses_before_anything(env):
 
 def test_a_bad_mission_stops_before_build_and_touches_no_unit(env, tmp_path):
     bad = tmp_path / "flight.yaml"
-    bad.write_text("missions:\n  - missions/nope.yaml\n")
+    bad.write_text("missions:\n  - missions/nope.py\n")
     result, calls = deploy(env, JL_FLIGHT_FILE=str(bad))
     assert result.returncode == 1
     assert "FAIL" in result.stdout
@@ -116,12 +116,12 @@ def test_a_full_deploy_runs_the_steps_in_order(env):
             "git pull",
             "colcon build",
             "systemctl enable",
-            "ros2 run jl_blocks readiness --names",
+            "ros2 run jl_flight readiness --names",
         )
     ]
     assert order == sorted(order)
     build = next(c for c in calls if c.startswith("colcon build"))
-    assert "--packages-up-to jl_blocks jl_mission oak_d_visual_odometry" in build
+    assert "--packages-up-to jl_flight jl_mission oak_d_visual_odometry" in build
     enable = next(c for c in calls if c.startswith("systemctl enable"))
     assert "jl_mission@takeoff_hold_land" in enable and "vio" in enable
     assert not any(
@@ -149,7 +149,7 @@ def test_check_only_runs_readiness(env):
     assert result.returncode == 0
     assert not any(c.startswith(("git", "colcon", "systemctl")) for c in calls)
     assert any(
-        c.startswith("ros2 run jl_blocks readiness --names TakeoffHoldLand")
+        c.startswith("ros2 run jl_flight readiness --names TakeoffHoldLand")
         for c in calls
     )
 
@@ -192,7 +192,7 @@ def test_dry_run_needs_no_live_ros_or_systemd_even_with_local_changes(env):
     assert result.returncode == 0, result.stdout + result.stderr
     assert "would run: colcon build" in result.stdout
     assert (
-        "would run: ros2 run jl_blocks readiness --names TakeoffHoldLand"
+        "would run: ros2 run jl_flight readiness --names TakeoffHoldLand"
         in result.stdout
     )
     assert calls == []
@@ -226,9 +226,9 @@ def test_force_cannot_override_armed(env):
         ("systemctl disable", ("systemctl enable", "systemctl restart")),
         (
             "systemctl enable",
-            ("systemctl restart", "ros2 run jl_blocks readiness --names"),
+            ("systemctl restart", "ros2 run jl_flight readiness --names"),
         ),
-        ("systemctl restart", ("ros2 run jl_blocks readiness --names",)),
+        ("systemctl restart", ("ros2 run jl_flight readiness --names",)),
     ],
 )
 def test_a_failed_step_stops_deploy(env, command, must_not_run):
@@ -254,7 +254,7 @@ def test_removed_enabled_but_unloaded_mission_is_disabled(env):
 
 def test_check_rejects_invalid_config_before_ros(env, tmp_path):
     bad = tmp_path / "flight.yaml"
-    bad.write_text("missions:\n  - missions/nope.yaml\n")
+    bad.write_text("missions:\n  - missions/nope.py\n")
     result, calls = deploy(env, "--check", JL_FLIGHT_FILE=str(bad))
     assert result.returncode == 1
     assert "FAIL" in result.stdout
@@ -264,7 +264,7 @@ def test_check_rejects_invalid_config_before_ros(env, tmp_path):
 def test_readiness_failure_is_a_deploy_failure(env):
     result, calls = deploy(env, "--check", STUB_ROS2_RC="7")
     assert result.returncode == 1
-    assert any(c.startswith("ros2 run jl_blocks readiness --names") for c in calls)
+    assert any(c.startswith("ros2 run jl_flight readiness --names") for c in calls)
 
 
 def test_sources_workspace_before_arm_probe_with_nounset_relaxed(env, tmp_path):

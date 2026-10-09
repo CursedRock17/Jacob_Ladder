@@ -1,3 +1,7 @@
+> **Superseded.** This describes the YAML mission-blocks design (`jl_blocks`), which has been
+> replaced by missions written as Python functions: see [`src/jl_flight`](../../../src/jl_flight/README.md).
+> Kept as a record of the design history and its findings.
+
 # Handoff: finish Mission Blocks Phase 5 (for a coding agent)
 
 You are picking up **Phase 5** of the mission-blocks work in this repo, part-way through. Read this whole file before touching anything.

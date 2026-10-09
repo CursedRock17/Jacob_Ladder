@@ -3,7 +3,7 @@
 <package format="3">
   <name>jl_mission</name>
   <version>0.1.0</version>
-  <description>The one C++ PX4 external mode behind every jl_blocks mission: relays checked setpoints, owns arm/takeoff/land</description>
+  <description>The one C++ PX4 external mode behind every jl_flight mission: relays checked setpoints, owns arm/takeoff/land</description>
   <maintainer email="mtglucas1@gmail.com">Lucas Wendland</maintainer>
   <license>BSD-3-Clause</license>
 

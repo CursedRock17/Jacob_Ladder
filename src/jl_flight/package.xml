@@ -1,0 +1,26 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>jl_flight</name>
+  <version>0.2.0</version>
+  <description>Fly missions written as plain Python: a Drone you script, a library of skills, and declared perception.</description>
+  <maintainer email="mtglucas1@gmail.com">Lucas Wendland</maintainer>
+  <license>BSD-3-Clause</license>
+
+  <exec_depend>python3-yaml</exec_depend>
+  <exec_depend>rclpy</exec_depend>
+  <exec_depend>launch</exec_depend>
+  <exec_depend>launch_ros</exec_depend>
+  <exec_depend>geometry_msgs</exec_depend>
+  <exec_depend>std_msgs</exec_depend>
+  <exec_depend>std_srvs</exec_depend>
+  <exec_depend>px4_msgs</exec_depend>
+  <exec_depend>jl_mission_interfaces</exec_depend>
+  <exec_depend>jl_mission</exec_depend>
+  <exec_depend>aruco_tracker</exec_depend>
+  <test_depend>python3-pytest</test_depend>
+
+  <export>
+    <build_type>ament_python</build_type>
+  </export>
+</package>

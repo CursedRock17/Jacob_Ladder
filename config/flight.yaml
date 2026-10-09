@@ -1,11 +1,16 @@
-# What this airframe registers at boot (spec section 7). After editing, run
-# ./deploy.sh on the drone: it checks, builds, and enables one
-# jl_mission@<file> service per mission below, then reports readiness.
+# What this aircraft registers at boot. After editing, run ./deploy.sh on the
+# drone: it checks, builds, and enables one jl_mission@<file> service per
+# mission below, then reports readiness.
 #
-# missions: files in missions/ -- each appears in QGC under its `name:`.
-# helpers:  boot services the missions need: vio, aruco_tracker, battery_monitor.
+# airframe: what is on this aircraft (cameras and mounts): a name from
+#           src/jl_flight/jl_flight/airframes.py.
+# missions: Python files in missions/ -- each appears in QGC under its @mission name,
+#           and starts the trackers it declares itself.
+# helpers:  other boot services the aircraft needs: vio, battery_monitor, and
+#           aruco_tracker (for the C++ precision_land modes only).
 #           A helper left out here is stopped and disabled by deploy.sh.
-# blocks:   optional folders or .py files with your own blocks.
+airframe: realsense_drone
 missions:
-  - missions/takeoff_hold_land.yaml
+  - missions/takeoff_hold_land.py
+  - missions/apriltag_approach.py
 helpers: [vio, battery_monitor]

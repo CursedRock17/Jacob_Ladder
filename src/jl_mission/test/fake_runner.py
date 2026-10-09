@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Stand-in for the Phase 3 mission_runner, used by sitl_jl_mission.sh.
+"""Stand-in for a mission (the jl_flight side), used by sitl_jl_mission.sh.
 
 Waits for /jl/NAME/active, asks for a takeoff, then streams a scripted
 sequence of setpoints (seconds after the takeoff reply):

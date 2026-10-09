@@ -7,9 +7,10 @@ HERE="$(dirname "$(readlink -f "$0")")"
 source "$HERE/sitl_common.sh"
 export GZ_PARTITION=sitl_rgbd
 trap kill_flight EXIT
+export RGBD_POINTS=true   # this check covers the point cloud too
 echo "== flight: rgbd camera =="
 logs=$(mktemp -d)
-start_px4_rgbd "$logs" || { echo "logs: $logs"; exit 1; }
+start_px4_world "$logs" rgbd_demo x500_rgbd || { echo "logs: $logs"; exit 1; }
 python3 "$HERE/check_rgbd.py"; rc=$?
 [ $rc -ne 0 ] && echo "logs: $logs"
 exit $rc

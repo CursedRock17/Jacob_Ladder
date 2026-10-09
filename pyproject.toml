@@ -110,7 +110,7 @@ extra-paths = [
     "src/drogue_flight",
     "src/ros2_yolo_image_processing",
     "packages/jetson_cudss_bootstrap",
-    "src/jl_blocks",
+    "src/jl_flight",
 ]
 
 [tool.ty.src]

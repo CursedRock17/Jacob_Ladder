@@ -32,7 +32,7 @@ fail() { echo "deploy: $*"; exit 1; }
 
 # Load from source so validation works before the first colcon build.
 flight() {
-    PYTHONPATH="$ROOT/src/jl_blocks" python3 -m jl_blocks.cli flight "$@" "$FLIGHT" --root "$ROOT"
+    PYTHONPATH="$ROOT/src/jl_flight" python3 -m jl_flight flight "$@" "$FLIGHT" --root "$ROOT"
 }
 source_ros() {
     if [ "$DRY" -eq 0 ] && [ "${JL_DEPLOY_NO_SOURCE:-0}" != 1 ]; then
@@ -46,25 +46,23 @@ source_ros() {
 # Validate first, then keep command arguments in arrays without shell splitting.
 load_config() {
     flight check || fail "fix the files above; nothing running was touched"
-    local unit_text unit name
-    unit_text=$(flight units) || fail "cannot read configured units"
-    mapfile -t wanted <<< "$unit_text"
-    names=(); helpers=()
+    local text unit
+    text=$(flight units) || fail "cannot read configured units"
+    mapfile -t wanted <<< "$text"
+    text=$(flight names) || fail "cannot read mission names"
+    mapfile -t names <<< "$text"
+    text=$(flight topics) || fail "cannot read perception topics"
+    topics=(); [ -n "$text" ] && mapfile -t topics <<< "$text"
+    helpers=()
     for unit in "${wanted[@]}"; do
-        case "$unit" in
-            jl_mission@*)
-                name=$(python3 -c 'import sys, yaml; print(yaml.safe_load(open(sys.argv[1]))["name"])' \
-                    "$ROOT/missions/${unit#jl_mission@}.yaml") || fail "cannot read mission name"
-                names+=("$name") ;;
-            *) helpers+=("$unit") ;;
-        esac
+        case "$unit" in jl_mission@*) ;; *) helpers+=("$unit") ;; esac
     done
 }
 readiness() {
     step "5/5 readiness"
     source_ros
-    run ros2 run jl_blocks readiness --names "${names[@]}" --helpers "${helpers[@]}" \
-        || fail "readiness check failed"
+    run ros2 run jl_flight readiness --names "${names[@]}" --helpers "${helpers[@]}" \
+        --topics "${topics[@]}" || fail "readiness check failed"
 }
 
 if [ "$CHECK_ONLY" -eq 1 ]; then
@@ -84,9 +82,9 @@ fi
 step "0/5 arm state"
 source_ros
 if [ "$DRY" -eq 1 ]; then
-    run ros2 run jl_blocks readiness --armed --seconds 3
+    run ros2 run jl_flight readiness --armed --seconds 3
 else
-    arm=$(ros2 run jl_blocks readiness --armed --seconds 3 2>/dev/null); arm_rc=$?
+    arm=$(ros2 run jl_flight readiness --armed --seconds 3 2>/dev/null); arm_rc=$?
     case "$arm_rc" in
         0) echo "disarmed" ;;
         3) fail "the vehicle is armed; land and disarm before deploying" ;;

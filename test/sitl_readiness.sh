@@ -9,7 +9,7 @@ failed=0
 probe() {
     local expected="$1" output rc pattern
     shift
-    output=$(ros2 run jl_blocks readiness "$@" 2>&1)
+    output=$(ros2 run jl_flight readiness "$@" 2>&1)
     rc=$?
     printf '%s\nexit=%s\n' "$output" "$rc"
     if [ "$rc" -ne "$expected" ]; then
