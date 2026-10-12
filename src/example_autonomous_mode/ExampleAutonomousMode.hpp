@@ -1,22 +1,9 @@
-/**
- * ExampleAutonomousMode.hpp — a minimal PX4 external flight mode
- *
- * This is the reference example for writing a new autonomous mode. It is
- * deliberately the simplest thing that still flies end to end:
- *
- *   1. Rise to a low "optical flow" height and pause, so the flow sensor has
- *      a textured surface close enough to lock onto before we climb away
- *   2. Hold position for a set duration
- *   3. Descend at a constant velocity until PX4 detects the landing
- *
- * It registers as a custom PX4 flight mode via the px4_ros2 library, which
- * means it appears in QGroundControl next to the built-in modes. Copy this
- * package as the starting point for a new mode — see README.md for the parts
- * you will want to change first.
- */
+// Example PX4 external mode and executor: take off, hold, descend, and land.
+// See README.md for the state diagrams and instructions for copying the example.
 #pragma once
 
 #include <px4_ros2/components/mode.hpp>
+#include <px4_ros2/components/mode_executor.hpp>
 #include <px4_ros2/control/setpoint_types/experimental/trajectory.hpp>
 #include <px4_ros2/odometry/local_position.hpp>
 
@@ -42,21 +29,20 @@ class ExampleAutonomousMode : public px4_ros2::ModeBase {
 public:
   explicit ExampleAutonomousMode(rclcpp::Node &node);
 
-  // Called by PX4 when this mode becomes active / inactive
+  // Called when PX4 selects this mode; the executor schedules it after takeoff.
   void onActivate() override;
+  // Called when PX4 leaves this mode (completion, takeover, or failsafe).
   void onDeactivate() override;
 
-  // Called every control loop iteration — this is where the state machine lives
+  // Called by the mode timer; dt_s is the measured interval in seconds.
   void updateSetpoint(float dt_s) override;
 
 private:
-  // Flight sequence as a state machine
   enum class State {
-    Idle,                   // Not doing anything
-    InitialTakeoffAltitude, // Low hover so optical flow / VIO odometry settles
-    Holding,                // Hovering in place for a set duration
-    Descending,             // Coming back down
-    Finished                // Landed — report success to PX4
+    Idle,       // Before activation and after deactivation; no setpoints
+    Holding,    // Hovering in place for a set duration
+    Descending, // Controlled descent to the native-landing handoff
+    Finished    // Report success to the executor
   };
 
   void loadParameters();
@@ -65,45 +51,55 @@ private:
   void switchToState(State state);
   std::string stateName(State state) const;
 
-  // Wraps _trajectory_setpoint->updatePosition and publishes the
-  // (commanded - actual) position error on /tracking_error
+  // Send a position setpoint and publish the optional NED tracking error.
   void commandPosition(const Eigen::Vector3f &pos);
 
   rclcpp::Node &_node;
 
-  // Subscription to know when the drone has physically touched down
+  // Optional preflight ground reference and descent stop signal
   rclcpp::Subscription<px4_msgs::msg::VehicleLandDetected>::SharedPtr
       _vehicle_land_detected_sub;
-
-  // Publishes the current state name on /drone_state for debugging
-  rclcpp::Publisher<std_msgs::msg::String>::SharedPtr _drone_state_publisher;
-
-  // Publishes commanded-minus-actual position on /tracking_error
+  // Optional debug topics.
+  rclcpp::Publisher<std_msgs::msg::String>::SharedPtr _drone_state_pub;
   rclcpp::Publisher<geometry_msgs::msg::Vector3Stamped>::SharedPtr
-      _tracking_error_publisher;
+      _tracking_error_pub;
 
-  // PX4 ROS 2 interface objects for reading position and sending commands
   std::shared_ptr<px4_ros2::OdometryLocalPosition> _vehicle_local_position;
   std::shared_ptr<px4_ros2::TrajectorySetpointType> _trajectory_setpoint;
 
-  // State machine tracking
   State _state = State::Idle;
-  Eigen::Vector3f _base_position{
-      Eigen::Vector3f::Zero()}; // Where the drone started (NED)
   Eigen::Vector3f _hold_position{
       Eigen::Vector3f::Zero()}; // Current commanded position
-  bool _reached_flow_height = false;
   bool _land_detected = false;
+  bool _ground_z_valid = false;
   float _state_elapsed = 0.0f; // Time spent in the current state (seconds)
+  float _ground_z = 0.0f;      // Ground plane observed while landed
 
-  // Tunable parameters — defaults here are only a fallback; the real values
-  // come from cfg/example_autonomous_mode_params.yaml via the launch file
-  float _optical_flow_height = 0.25f;    // Height for optical flow init (m)
-  float _optical_flow_hold_time = 3.0f;  // Hover time at flow height (s)
-  float _delta_position = 0.05f;         // "Close enough" threshold (m)
-  float _hold_duration = 7.5f;           // How long to hold at altitude (s)
-  float _descent_vel = 0.5f;             // Vertical speed during descent (m/s)
-  float _landing_height = 0.10f;         // Height above start counted as down (m)
+  // Defaults, overridden by cfg/example_autonomous_mode_params.yaml.
+  float _hold_duration = 7.5f;   // How long to hold at altitude (s)
+  float _descent_vel = 0.5f;     // Vertical speed during descent (m/s)
+  float _landing_height = 0.10f; // Native-landing handoff height AGL (m)
+};
+
+class ExampleAutonomousModeExecutor : public px4_ros2::ModeExecutorBase {
+public:
+  ExampleAutonomousModeExecutor(rclcpp::Node &node,
+                                px4_ros2::ModeBase &owned_mode);
+  enum class State {
+    Arming,           // Arm the vehicle
+    TakingOff,        // PX4-native takeoff to its configured altitude
+    RunningMode,      // Schedule the external setpoint mode
+    Landing,          // PX4-native final touchdown
+    WaitingForDisarm, // Wait for PX4 to report the vehicle disarmed
+  };
+
+  void onActivate() override;
+  void onDeactivate(DeactivateReason reason) override;
+
+private:
+  void runState(State state, px4_ros2::Result result);
+
+  rclcpp::Node &_node;
 };
 
 } // namespace example_autonomous_mode

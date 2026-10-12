@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 940 380" role="img" aria-labelledby="title desc">
+  <title id="title">Finding a registered PX4 external mode</title>
+  <desc id="desc">An illustrative MAVLink Console output on the left points from External Mode 1 to a matching external mode in a flight mode selector on the right.</desc>
+  <rect width="940" height="380" rx="16" fill="#eef2f6"/>
+  <text x="28" y="35" fill="#243447" font-family="Arial, sans-serif" font-size="17" font-weight="bold">Illustration: match the mode number and name</text>
+  <rect x="28" y="59" width="515" height="272" rx="10" fill="#18212b"/>
+  <text x="48" y="89" fill="#e9f1f8" font-family="Arial, sans-serif" font-size="16" font-weight="bold">QGroundControl · MAVLink Console</text>
+  <text x="48" y="126" fill="#9de4b5" font-family="monospace" font-size="17">&gt; commander status</text>
+  <text x="48" y="165" fill="#d4deea" font-family="monospace" font-size="14">INFO [commander] ...</text>
+  <rect x="43" y="185" width="486" height="49" rx="6" fill="none" stroke="#ffb547" stroke-width="3"/>
+  <text x="52" y="215" fill="#ffffff" font-family="monospace" font-size="14">External Mode 1: name: ExampleAutonomousMode</text>
+  <text x="48" y="275" fill="#b1bdcb" font-family="Arial, sans-serif" font-size="14">Your mode number and nav_state can differ.</text>
+  <path d="M 548 208 C 590 208, 580 208, 620 208" fill="none" stroke="#d98218" stroke-width="4"/>
+  <path d="M 620 208 l -13 -8 v 16 z" fill="#d98218"/>
+  <rect x="629" y="59" width="282" height="272" rx="10" fill="#ffffff" stroke="#b9c7d5"/>
+  <text x="648" y="89" fill="#243447" font-family="Arial, sans-serif" font-size="16" font-weight="bold">Flight mode list</text>
+  <text x="650" y="133" fill="#445468" font-family="Arial, sans-serif" font-size="15">Position</text>
+  <text x="650" y="174" fill="#445468" font-family="Arial, sans-serif" font-size="15">Mission</text>
+  <rect x="644" y="188" width="252" height="45" rx="6" fill="#fff1db" stroke="#d98218" stroke-width="2"/>
+  <text x="655" y="216" fill="#26394c" font-family="Arial, sans-serif" font-size="14">External Mode 1</text>
+  <text x="650" y="272" fill="#445468" font-family="Arial, sans-serif" font-size="14">Select the matching entry.</text>
+  <text x="29" y="360" fill="#586a7c" font-family="Arial, sans-serif" font-size="13">UI varies by QGroundControl version and vehicle setup; this is not a live screenshot.</text>
+</svg>

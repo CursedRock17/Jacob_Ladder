@@ -1,0 +1,5 @@
+# Used by make format-cpp. Older packages still use astyle.
+---
+BasedOnStyle: LLVM
+IndentWidth: 2
+ColumnLimit: 80
