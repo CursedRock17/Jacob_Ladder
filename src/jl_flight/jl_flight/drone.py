@@ -56,6 +56,8 @@ from .skills.turn import wrap
 MAX_SPEED = 1.0  # m/s: jl_mission's default limit; it clamps anything faster
 RATE_HZ = 50.0
 MOVE_TIMEOUT_S = 10.0  # extra time a move is allowed beyond what it should take
+TAKEOFF_TIMEOUT_S = 30.0  # extra time a takeoff is allowed beyond what it should take
+TAKEOFF_TOLERANCE_M = 0.15  # how near the height counts as there
 
 
 class Position(NamedTuple):
@@ -194,20 +196,30 @@ class Drone:
     def arm(self) -> None:
         """Arm and stay on the ground, with the mission in control.
 
-        This does not take off: PX4 only lifts off from position setpoints in
-        Offboard mode, never in an external mode like this one. Call take_off()
-        next (it arms by itself if you skip this).
+        This does not take off: call take_off() next (it arms by itself if you
+        skip this), or climb with your own setpoints.
         """
         self._call("arm", self.backend.arm)
         self._hold_here()
 
     def take_off(self, height: float | None = None) -> None:
-        """Arm and climb with PX4's own takeoff, to `height` metres (default_height)."""
+        """Arm and climb `height` metres (default_height) by sending position setpoints.
+
+        Not PX4's takeoff command. Like a mission doing it by hand: the setpoint is
+        where the drone is now plus `height`, sent until the drone gets there.
+        Raises Timeout if it has not in good time, e.g. with no props.
+        """
         height = self._default_height if height is None else height
         if not 0 < height <= 10:
             raise ValueError(f"height must be in (0, 10] m, got {height}")
-        self._call("takeoff", lambda: self.backend.takeoff(height))
-        self._hold_here()
+        self._call("takeoff", self.backend.arm)
+        hover = self.position
+        desired_position = hover.with_up(hover.up + height)
+        for _t in self.every(height / MAX_SPEED + TAKEOFF_TIMEOUT_S):
+            self.send_position(desired_position)
+            if self.position.up >= desired_position.up - TAKEOFF_TOLERANCE_M:
+                return
+        raise Timeout(f"take_off did not reach {height:g} m")
 
     def land(self) -> None:
         """Land with PX4's own land mode, and wait until the drone is down."""

@@ -14,7 +14,7 @@ DROGUE = YoloDrogue(camera="front")
 
 @mission("DrogueApproach", needs=[DROGUE])
 def drogue_approach(drone):
-    drone.take_off(1.75)
+    drone.take_off(0.1)
     try:
         drone.follow(DROGUE, standoff=3.0)
     except TargetLost:

@@ -92,7 +92,7 @@ def test_run_flies_a_repo_mission_end_to_end() -> None:
     backend = FakeBackend(camera_offset=(m.forward, m.right, m.down))
     backend.put_tag(tag.topic, (6.0, 0.0, -1.2))
     run(spec, airframe=X500_RGBD, backend=backend, log=lambda m: None)
-    assert backend.calls == ["connect", "takeoff 1.5", "land"]
+    assert backend.calls == ["connect", "arm", "land"]
     assert backend.position[0] == pytest.approx(4.5, abs=0.2)
 
 

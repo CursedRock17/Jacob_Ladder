@@ -39,8 +39,9 @@ Distances are metres, angles degrees, "up" positive. Each blocks until it is don
 
 | | |
 |---|---|
-| `take_off(height)` / `land()` | PX4's own takeoff and land |
-| `arm()` | arm and stay on the ground (PX4 will not lift off from position setpoints in an external mode: `take_off()` next) |
+| `take_off(height)` | arm, then send position setpoints `height` metres above here until the drone is there (not PX4's takeoff) |
+| `land()` | PX4's own land |
+| `arm()` | arm and stay on the ground (`take_off()` next, or climb with your own setpoints) |
 | `forward / back / left / right / up / down (distance, velocity=None)` | straight-line move relative to where the drone faces |
 | `move_distance(forward, left, up)`, `goto(north, east, up)` | the same in three axes; a spot measured from where PX4 started |
 | `turn_left(deg)` / `turn_right(deg)` / `hover(seconds)` | turn in place / stay put |
@@ -151,11 +152,10 @@ twice a second prints what it is commanding, where the drone is, and where it se
 ```
 
 North, east and up are metres from where PX4's position estimate started. Without propellers
-the drone cannot climb, so a props-off run ends at the takeoff: PX4's own takeoff never
-reaches the height, PX4 disarms an aircraft that has not left the ground within
-`COM_DISARM_PRFLT` seconds, and `jl_mission` gives up on the takeoff after 30 s and lands. During
-it the report shows `setpoint none (PX4 is flying its own takeoff)` (PX4, not the mission, is
-in control), the drone's position, and the tag estimate, so you can check the motors, the
+the drone cannot climb, so a props-off run ends at the takeoff: the setpoint sits above the
+drone, PX4 disarms an aircraft that has not left the ground within `COM_DISARM_PRFLT` seconds, and
+`take_off()` raises `Timeout` after the climb time plus 30 s, which lands the drone. The report shows
+the setpoint, the drone's position, and the tag estimate, so you can check the motors, the
 arming, and that the tag is seen where it really is. Stop the `jl_mission@apriltag_approach`
 service first if `deploy.sh` already installed it (`sudo systemctl stop jl_mission@apriltag_approach`),
 so only one copy runs.

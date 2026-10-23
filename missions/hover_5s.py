@@ -9,9 +9,12 @@ from jl_flight import mission
 
 @mission("HoverTest")
 def hover_5s(drone):
+    desired_z = 1.5
+    # drone.take_off(1.)
     drone.arm()
-    drone.take_off(1.5)  # PX4's own takeoff: position setpoints alone cannot lift off
     hover = drone.position  # where we are now, 1.5 m up
     for _t in drone.every(5):
-        drone.send_position(hover)
+        desired_position = [hover[0], hover[1], hover[2] + desired_z]
+        drone.send_position(desired_position)
+        print(f"Current: {drone.position}, Desired: {desired_position}")
     drone.land()

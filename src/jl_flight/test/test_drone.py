@@ -21,16 +21,15 @@ def make(backend: FakeBackend | None = None, **kwargs):
 def test_enter_takes_off_and_exit_lands() -> None:
     backend, drone = make()
     with drone as d:
-        assert d.position.up == pytest.approx(1.5, abs=0.05)
-    assert backend.calls == ["connect", "takeoff 1.5", "land"]
+        assert d.position.up == pytest.approx(1.5, abs=0.2)
+    assert backend.calls == ["connect", "arm", "land"]
     assert backend.closed
 
 
 def test_takeoff_height_is_configurable() -> None:
     backend, drone = make(default_height=2.5)
-    with drone:
-        pass
-    assert "takeoff 2.5" in backend.calls
+    with drone as d:
+        assert d.position.up == pytest.approx(2.5, abs=0.2)
 
 
 class SelectedAfterOneSecond(FakeBackend):
@@ -46,7 +45,7 @@ def test_waits_until_the_mode_is_selected() -> None:
     drone = Drone("Test", backend=backend, keepalive=False, log=messages.append)
     with drone:
         assert backend.t > 1.0
-        assert "takeoff 1.5" in backend.calls
+        assert "arm" in backend.calls
     assert any("select it in QGC" in m for m in messages)
 
 
@@ -145,7 +144,7 @@ def test_low_level_arm_send_position_land() -> None:
         d.land()
     assert backend.calls[-1] == "land"
     assert backend.calls.count("land") == 1  # leaving the block does not land twice
-    assert not any(c.startswith("takeoff") for c in backend.calls)
+    assert backend.calls.count("arm") == 1
 
 
 def test_every_runs_for_the_duration() -> None:
@@ -187,8 +186,8 @@ def test_the_pilot_taking_over_stops_the_script_without_landing() -> None:
 
 def test_failed_takeoff_is_an_error() -> None:
     backend, drone = make()
-    backend.fail["takeoff"] = "arm failed: denied"
-    with pytest.raises(FlightError, match="takeoff failed: arm failed: denied"):
+    backend.fail["arm"] = "denied"
+    with pytest.raises(FlightError, match="takeoff failed: denied"):
         drone.__enter__()
     assert backend.closed
 
@@ -260,3 +259,13 @@ def test_keepalive_sends_setpoints_while_the_script_sleeps() -> None:
         assert sent >= 10
         assert max(b - a for a, b in zip(times, times[1:], strict=False)) < 0.15
         d.land()
+
+
+def test_a_takeoff_that_never_climbs_times_out() -> None:
+    class NoLift(FakeBackend):
+        def _advance(self, dt: float) -> None:
+            self.t += dt  # no props: the setpoint moves nothing
+
+    _, drone = make(NoLift())
+    with pytest.raises(Timeout, match="take_off did not reach"):
+        drone.__enter__()

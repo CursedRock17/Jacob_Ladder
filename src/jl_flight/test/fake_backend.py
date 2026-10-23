@@ -163,5 +163,7 @@ class FakeBackend:
             error = math.remainder(sp.yaw - self.yaw, 2 * math.pi)
             turn = math.copysign(min(abs(error), math.radians(90) * dt), error)
             self.yaw = math.remainder(self.yaw + turn, 2 * math.pi)
+        if self.position[2] < -0.05:
+            self.landed = False  # off the ground, however it got there
         self.t += dt
         self._detections()
