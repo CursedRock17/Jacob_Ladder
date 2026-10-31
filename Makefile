@@ -55,21 +55,21 @@ clean:
 	@echo "All build artifacts removed"
 
 # Lint, type-check and unit-test the mission blocks (no ROS needed). The tools
-# are pinned and installed once into .check-venv, so the same versions run here
-# and in CI (.github/workflows/check.yml). uv must be installed.
+# are pinned in mise.toml; only test dependencies go into .check-venv.
+# Run `mise install` first. This full target may download Python 3.10 via uv.
 CHECK_VENV := .check-venv
 CHECK_BIN := $(CHECK_VENV)/bin
 JL_BLOCKS := src/jl_blocks
 MISSIONS := $(wildcard missions/*.yaml)
 
 $(CHECK_BIN)/pytest:
-	uv venv --python 3.10 $(CHECK_VENV)
-	uv pip install --python $(CHECK_VENV) ruff==0.15.20 ty==0.0.55 pytest==9.1.1 pyyaml==6.0.3
+	mise exec -- uv venv --python 3.10 $(CHECK_VENV)
+	mise exec -- uv pip install --python $(CHECK_VENV) pytest==9.1.1 pyyaml==6.0.3
 
 check: $(CHECK_BIN)/pytest
-	$(CHECK_BIN)/ruff check $(JL_BLOCKS)
-	$(CHECK_BIN)/ruff format --check $(JL_BLOCKS)
-	$(CHECK_BIN)/ty check --python $(CHECK_VENV) --exclude 'src/jl_blocks/jl_blocks/ros/' $(JL_BLOCKS)/jl_blocks $(JL_BLOCKS)/test
+	mise run lint
+	mise run format-check
+	mise exec -- ty check --python $(CHECK_VENV) --exclude 'src/jl_blocks/jl_blocks/ros/' $(JL_BLOCKS)/jl_blocks $(JL_BLOCKS)/test
 	PYTHONPATH=$(JL_BLOCKS) $(CHECK_BIN)/pytest -q $(JL_BLOCKS)/test test/test_deploy.py
 ifneq ($(MISSIONS),)
 	PYTHONPATH=$(JL_BLOCKS) $(CHECK_BIN)/python -m jl_blocks.cli check $(MISSIONS)

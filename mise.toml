@@ -1,0 +1,36 @@
+[tools]
+"aqua:astral-sh/ruff" = "0.17.3"
+"aqua:astral-sh/ty" = "0.0.95"
+"aqua:astral-sh/uv" = "0.13.6"
+
+[tasks.check]
+description = "ROS-free static checks; no project dependency installation"
+depends = ["lint", "format-check", "typecheck"]
+
+[tasks.lint]
+description = "Lint the enforced mission-block scope"
+run = "ruff check src/jl_blocks"
+
+[tasks.format-check]
+description = "Check mission-block formatting without changing files"
+run = "ruff format --check src/jl_blocks"
+
+[tasks.typecheck]
+description = "Check dependency-free mission modules (no ROS, PyYAML or pytest)"
+run = "ty check --exclude 'src/jl_blocks/jl_blocks/ros/' --exclude 'src/jl_blocks/jl_blocks/core/loader.py' --exclude 'src/jl_blocks/jl_blocks/flight.py' src/jl_blocks/jl_blocks"
+
+[tasks.lint-all]
+description = "Read-only workspace lint baseline; existing violations may fail"
+run = "ruff check ."
+
+[tasks.format-check-all]
+description = "Read-only workspace formatting baseline; existing violations may fail"
+run = "ruff format --check ."
+
+[tasks.typecheck-all]
+description = "Workspace type diagnostics; requires target dependencies for full resolution"
+run = "ty check ."
+
+[tasks.test]
+description = "Full existing ROS-free checks; installs Python 3.10, pytest and PyYAML via uv"
+run = "make check"
