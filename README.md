@@ -494,10 +494,15 @@ Different configurations of physical drones may require different PX4 Parameter 
 any and all tested forms of parameters are labelled in the [`config/params`](config/params) directory.
 
 ### Checking your work
-`make check` lints, type-checks and unit-tests the mission blocks in
-[`src/jl_blocks`](src/jl_blocks), and checks every mission file in `missions/`.
-It needs only [uv](https://docs.astral.sh/uv/) (no ROS), takes a few seconds, and
-runs automatically on every push through GitHub Actions.
+Run `mise install`, then `mise run check` for read-only lint, formatting and
+dependency-free type checks. This works on macOS without ROS, a project virtual
+environment, or any camera/GPU packages. Ruff, ty and uv are pinned in `mise.toml`.
+
+`mise run test` (or `make check`) additionally installs Python 3.10 if needed,
+pytest and PyYAML into an isolated `.check-venv`, then checks the full ROS-free
+mission package, unit tests, deployment tests and mission YAML files. CI runs
+both workflows on every push. See [Python stability](docs/python-stability.md)
+for exact scope, workspace baseline commands and the gradual rollout policy.
 
 ### Before You Fly
 

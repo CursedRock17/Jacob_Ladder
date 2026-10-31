@@ -13,13 +13,15 @@ from typing import Any, ClassVar, TypeVar
 from .types import Action, ActionStatus, Setpoint, Status, Vector3, VehicleState
 
 
+@dataclass
+class _BlockParams:
+    pass
+
+
 class Block:
     kind: ClassVar[str] = "block"
     name: ClassVar[str] = ""
-
-    @dataclass
-    class Params:
-        pass
+    Params: type[Any] = _BlockParams
 
     def __init__(self, params: object | None = None) -> None:
         # Any: each block's Params dataclass is different, and YAML fills it in.
