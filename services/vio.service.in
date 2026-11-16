@@ -17,6 +17,10 @@ Type=simple
 User=@JL_USER@
 Group=@JL_GROUP@
 WorkingDirectory=@JL_WS_ROOT@
+# Hold off until NTP has set the clock: a cold boot starts at 1970 and the
+# later ~56-year step makes cuVSLAM reject every frame (see the script).
+ExecStartPre=/bin/bash @JL_WS_ROOT@/services/wait_for_clock.sh
+TimeoutStartSec=infinity
 ExecStart=/bin/bash @JL_WS_ROOT@/services/run_vio.sh
 # Restart=always, not on-failure: `ros2 launch` exits 0 even when the node it
 # supervises dies (verified 2026-09-04 -- the camera pipeline exited 1, launch

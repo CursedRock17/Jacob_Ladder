@@ -5,6 +5,6 @@ from jl_flight import mission
 
 @mission("TakeoffHoldLand")
 def takeoff_hold_land(drone):
-    drone.take_off(1.5)
+    drone.take_off(2.0)
     drone.hover(5)
     drone.land()

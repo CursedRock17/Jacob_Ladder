@@ -22,7 +22,7 @@ def test_enter_takes_off_and_exit_lands() -> None:
     backend, drone = make()
     with drone as d:
         assert d.position.up == pytest.approx(1.5, abs=0.2)
-    assert backend.calls == ["connect", "arm", "land"]
+    assert backend.calls == ["connect", "takeoff 1.5", "land"]
     assert backend.closed
 
 
@@ -45,7 +45,7 @@ def test_waits_until_the_mode_is_selected() -> None:
     drone = Drone("Test", backend=backend, keepalive=False, log=messages.append)
     with drone:
         assert backend.t > 1.0
-        assert "arm" in backend.calls
+        assert any(c.startswith("takeoff") for c in backend.calls)
     assert any("select it in QGC" in m for m in messages)
 
 
@@ -186,7 +186,7 @@ def test_the_pilot_taking_over_stops_the_script_without_landing() -> None:
 
 def test_failed_takeoff_is_an_error() -> None:
     backend, drone = make()
-    backend.fail["arm"] = "denied"
+    backend.fail["takeoff"] = "denied"
     with pytest.raises(FlightError, match="takeoff failed: denied"):
         drone.__enter__()
     assert backend.closed
@@ -261,11 +261,34 @@ def test_keepalive_sends_setpoints_while_the_script_sleeps() -> None:
         d.land()
 
 
-def test_a_takeoff_that_never_climbs_times_out() -> None:
-    class NoLift(FakeBackend):
-        def _advance(self, dt: float) -> None:
-            self.t += dt  # no props: the setpoint moves nothing
+def test_take_off_uses_jl_missions_takeoff_and_holds_there() -> None:
+    backend, drone = make(take_off_on_enter=False)
+    with drone as d:
+        d.take_off(0.5)
+        assert "takeoff 0.5" in backend.calls
+        assert d.position.up == pytest.approx(0.5)
+        d.land()
 
-    _, drone = make(NoLift())
-    with pytest.raises(Timeout, match="take_off did not reach"):
+
+def test_a_takeoff_jl_mission_gives_up_on_raises() -> None:
+    backend = FakeBackend()
+    backend.fail["takeoff"] = "did not reach takeoff height in time"
+    _, drone = make(backend)
+    with pytest.raises(FlightError, match="did not reach takeoff height"):
         drone.__enter__()
+
+
+def test_take_off_holds_the_full_height_after_an_early_hand_over() -> None:
+    class HandsOverEarly(FakeBackend):
+        def takeoff(self, height: float) -> tuple[bool, str]:
+            ok, message = super().takeoff(height)
+            self.position[2] += 0.2  # jl_mission hands over 0.2 m short
+            return ok, message
+
+    backend, drone = make(HandsOverEarly(), take_off_on_enter=False)
+    with drone as d:
+        d.take_off(0.5)
+        assert d.position.up == pytest.approx(0.3)
+        d.hover(1)  # holds the height asked for, not where it was handed over
+        assert d.position.up == pytest.approx(0.5, abs=0.05)
+        d.land()

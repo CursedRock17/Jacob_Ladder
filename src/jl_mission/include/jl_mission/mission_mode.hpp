@@ -136,30 +136,33 @@ private:
               std::shared_ptr<LandSrv::Request> request);
   void finishTakeoff(bool success, const std::string &message);
   void finishLand(bool success, const std::string &message);
-  void checkClimb();
+  // PX4's takeoff is done, or local z got within kTakeoffHandoverMargin of the
+  // height first: stop PX4's takeoff and finish the climb in the relay mode.
+  void handOverFromPx4Takeoff(const std::string &how);
+  void watchPx4Takeoff();
   // Idempotent: safe to call while a landing is already underway.
   void landNow(const std::string &why);
   void onScheduledModeResult(px4_ros2::Result result);
 
   rclcpp::Node &_node;
   RelayMode &_mode;
-  float _climb_tolerance_m{0.1f};
   float _takeoff_timeout_s{30.f};
 
   rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr _active_pub;
   rclcpp::Service<ArmSrv>::SharedPtr _arm_srv;
   rclcpp::Service<TakeoffSrv>::SharedPtr _takeoff_srv;
   rclcpp::Service<LandSrv>::SharedPtr _land_srv;
-  rclcpp::TimerBase::SharedPtr _climb_timer;
+  // drogue_flight's takeoff (commit eace3d2): PX4's takeoff climbs toward
+  // MIS_TAKEOFF_ALT (2.5 m here) and its completion callback is unreliable
+  // below it, so local z is watched as well and whichever comes first wins.
+  rclcpp::TimerBase::SharedPtr _takeoff_watch_timer;
+  bool _px4_takeoff_running{false};
 
   std::shared_ptr<rmw_request_id_t> _arm_request;
   std::shared_ptr<rmw_request_id_t> _takeoff_request;
   std::vector<std::shared_ptr<rmw_request_id_t>> _land_requests;
   Eigen::Vector3f _climb_target{Eigen::Vector3f::Zero()};
   rclcpp::Time _takeoff_started;
-  // When the climb first satisfied the height + vz settle condition; reset
-  // whenever either condition fails. Unset while unsettled.
-  std::optional<rclcpp::Time> _climb_settled_since;
   bool _landing{false};
   // Set by a Land() that pre-empts a pending takeoff; the arm/takeoff
   // callbacks check it and bail out instead of continuing the sequence.

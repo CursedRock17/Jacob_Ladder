@@ -66,7 +66,8 @@ def test_the_approach_holds_3_m_short_until_the_pilot_takes_over(name: str) -> N
     assert north == pytest.approx(TARGET[0] - 3.0, abs=0.25)
     assert east == pytest.approx(0.0, abs=0.2)
     assert down == pytest.approx(TARGET[2], abs=0.2)  # at the target's height
-    assert b.calls == ["connect", "arm"]  # the pilot has it now: no landing
+    assert b.calls[0] == "connect" and b.calls[1].startswith("takeoff")
+    assert len(b.calls) == 2  # the pilot has it now: no landing
 
 
 def test_the_drogue_is_followed_as_it_moves_away() -> None:
@@ -93,5 +94,5 @@ def test_losing_the_target_lands(name: str) -> None:
 
 def test_land_before_apriltag_lands_1_5_m_short() -> None:
     b = fly("land_before_apriltag.py", takeover_at=math.inf)
-    assert b.calls == ["connect", "arm", "land"]
+    assert [c.split()[0] for c in b.calls] == ["connect", "takeoff", "land"]
     assert b.position[0] == pytest.approx(TARGET[0] - 1.5, abs=0.2)

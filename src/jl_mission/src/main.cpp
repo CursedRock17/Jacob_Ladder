@@ -13,6 +13,7 @@
 
 #include <chrono>
 #include <stdexcept>
+#include <string>
 
 int main(int argc, char *argv[]) {
   using namespace std::chrono_literals;
@@ -30,9 +31,31 @@ int main(int argc, char *argv[]) {
     }
   }
 
+  // A lost reply leaves PX4 holding a ghost registration of this name, which
+  // pushes us into another slot and then times us out ("no request received
+  // from FMU"). PX4 drops the ghost once it stops answering, so registering
+  // again recovers. Up to kMaxAttempts in a row; a registration that held for
+  // kHealthyFor counts as a success and resets the count.
   const auto retry_delay = 2s;
+  constexpr int kMaxAttempts = 5;
+  constexpr auto kHealthyFor = 60s;
+  int failures = 0;
   int exit_code = 0;
+
+  // PX4 remembers which slot each mode name had (COM_MODEn_HASH) and gives it
+  // back on the next registration -- unless that name is still registered.
+  // Then the newcomer lands in the first free slot (typically ext1) and the
+  // stale registration lingers until PX4 finds it unresponsive (3 missed
+  // arming-check rounds, ~1 s, and only while disarmed and not selected).
+  // With mode_slot set, a registration in any other slot is dropped and
+  // retried after kSlotRetryDelay, by which time PX4 has removed the stale
+  // one and hands back the remembered slot. After kMaxSlotRetries we keep
+  // whatever slot we got rather than leave the mission unflyable.
+  constexpr auto kSlotRetryDelay = 3s;
+  constexpr int kMaxSlotRetries = 3;
+  int slot_retries = 0;
   while (rclcpp::ok()) {
+    const auto attempt_start = std::chrono::steady_clock::now();
     try {
       auto node = std::make_shared<px4_ros2::NodeWithModeExecutor<
           jl_mission::MissionExecutor, jl_mission::RelayMode>>("jl_mission",
@@ -46,6 +69,27 @@ int main(int argc, char *argv[]) {
                        1;
       RCLCPP_INFO(node->get_logger(), "Registered '%s' with PX4 (mode ext%d)",
                   node->getMode().missionName().c_str(), slot);
+      const auto wanted_slot =
+          node->declare_parameter<int64_t>("mode_slot", 0); // 0 = any
+      if (wanted_slot > 0 && slot != wanted_slot) {
+        if (slot_retries < kMaxSlotRetries) {
+          ++slot_retries;
+          RCLCPP_WARN(node->get_logger(),
+                      "Wanted ext%ld, got ext%d (PX4 still holds an earlier "
+                      "registration of this name); re-registering in %lds "
+                      "(%d of %d)",
+                      static_cast<long>(wanted_slot), slot,
+                      static_cast<long>(kSlotRetryDelay.count()), slot_retries,
+                      kMaxSlotRetries);
+          node.reset(); // unregisters from PX4
+          rclcpp::sleep_for(kSlotRetryDelay);
+          continue;
+        }
+        RCLCPP_WARN(node->get_logger(),
+                    "Still ext%d instead of ext%ld after %d re-registrations; "
+                    "keeping ext%d",
+                    slot, static_cast<long>(wanted_slot), kMaxSlotRetries, slot);
+      }
       rclcpp::spin(node);
       break;
     } catch (const rclcpp::exceptions::InvalidParameterTypeException &e) {
@@ -62,9 +106,32 @@ int main(int argc, char *argv[]) {
       exit_code = 1;
       break;
     } catch (const std::runtime_error &e) {
+      if (std::chrono::steady_clock::now() - attempt_start >= kHealthyFor) {
+        failures = 0;
+      }
+      if (++failures >= kMaxAttempts) {
+        RCLCPP_FATAL(rclcpp::get_logger("jl_mission"),
+                     "Mode registration failed (%s); giving up after %d "
+                     "attempts in a row",
+                     e.what(), failures);
+        exit_code = 1;
+        break;
+      }
       RCLCPP_WARN(rclcpp::get_logger("jl_mission"),
-                  "Mode registration failed (%s); retrying in %lds", e.what(),
-                  static_cast<long>(retry_delay.count()));
+                  "Mode registration failed (%s); retrying in %lds "
+                  "(attempt %d of %d)",
+                  e.what(), static_cast<long>(retry_delay.count()),
+                  failures + 1, kMaxAttempts);
+      // px4-ros2's arming-check watchdog shuts rclcpp down before throwing,
+      // which would end this loop: bring it back up to try again. Any other
+      // shutdown is Ctrl+C or the launch stopping us, so respect it.
+      if (!rclcpp::ok()) {
+        if (std::string(e.what()).find("no request received from FMU") ==
+            std::string::npos) {
+          break;
+        }
+        rclcpp::init(argc, argv);
+      }
       rclcpp::sleep_for(retry_delay);
     }
   }

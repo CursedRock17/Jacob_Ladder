@@ -296,15 +296,9 @@ MissionExecutor::MissionExecutor(rclcpp::Node &node, RelayMode &mode)
       _node(node), _mode(mode) {
   setSkipMessageCompatibilityCheck();
 
-  _climb_tolerance_m =
-      node.declare_parameter<float>("climb_tolerance_m", _climb_tolerance_m);
   _takeoff_timeout_s =
       node.declare_parameter<float>("takeoff_timeout_s", _takeoff_timeout_s);
 
-  if (!(_climb_tolerance_m > 0.f)) {
-    throw std::invalid_argument("climb_tolerance_m must be > 0, got " +
-                                std::to_string(_climb_tolerance_m));
-  }
   if (!(_takeoff_timeout_s > 0.f)) {
     throw std::invalid_argument("takeoff_timeout_s must be > 0, got " +
                                 std::to_string(_takeoff_timeout_s));
@@ -350,7 +344,8 @@ void MissionExecutor::onDeactivate(DeactivateReason reason) {
   std_msgs::msg::Bool inactive;
   inactive.data = false;
   _active_pub->publish(inactive);
-  _climb_timer.reset();
+  _takeoff_watch_timer.reset();
+  _px4_takeoff_running = false;
   _mode.reset();
   _mode.state().set("inactive");
   const std::string why = reason == DeactivateReason::FailsafeActivated
@@ -511,64 +506,72 @@ void MissionExecutor::onTakeoff(std::shared_ptr<rmw_request_id_t> header,
     const float target_amsl = amsl ? *amsl + height : NAN;
     if (!amsl) {
       RCLCPP_WARN(_node.get_logger(),
-                  "No global position: PX4 takes off to MIS_TAKEOFF_ALT, then "
-                  "the mission climbs to %.2f m",
+                  "No global position: PX4 heads for MIS_TAKEOFF_ALT; the mission "
+                  "takes over near %.2f m",
                   height);
     }
+    _px4_takeoff_running = true;
+    _takeoff_watch_timer = _node.create_wall_timer(
+        std::chrono::milliseconds(50), [this] { watchPx4Takeoff(); });
     takeoff(
         [this](px4_ros2::Result takeoff_result) {
-          if (_takeoff_aborted) {
+          // Also called with Deactivated once the watcher has handed over and
+          // scheduled our mode: that takeoff is ours to drop, so ignore it.
+          if (_takeoff_aborted || !_px4_takeoff_running) {
             return;
           }
           if (takeoff_result != px4_ros2::Result::Success) {
+            _px4_takeoff_running = false;
+            _takeoff_watch_timer.reset();
             finishTakeoff(false, std::string("takeoff failed: ") +
                                      resultToString(takeoff_result));
             return;
           }
-          // PX4 calls takeoff complete within NAV_MC_ALT_RAD of the target,
-          // so climb the rest of the way in our own mode before handing over.
-          _mode.beginClimb(_climb_target);
-          scheduleMode(ownedMode().id(), [this](px4_ros2::Result relay_result) {
-            onScheduledModeResult(relay_result);
-          });
-          if (isInCharge() && !_landing) {
-            _climb_settled_since.reset();
-            _climb_timer = _node.create_wall_timer(
-                std::chrono::milliseconds(100), [this] { checkClimb(); });
-          } else {
-            finishTakeoff(false, "could not start the climb");
-          }
+          handOverFromPx4Takeoff("PX4 takeoff complete");
         },
         target_amsl);
   });
 }
 
-void MissionExecutor::checkClimb() {
-  if (!_takeoff_request) {
-    _climb_timer.reset();
-    _climb_settled_since.reset();
+void MissionExecutor::watchPx4Takeoff() {
+  if (!_px4_takeoff_running || _takeoff_aborted) {
+    _takeoff_watch_timer.reset();
     return;
   }
-  const float error = std::abs(_mode.position().z() - _climb_target.z());
-  const float vz = std::abs(_mode.velocity().z());
-  if (error <= _climb_tolerance_m && vz < 0.1f) {
-    if (!_climb_settled_since) {
-      _climb_settled_since = _node.now();
-    } else if ((_node.now() - *_climb_settled_since).seconds() >= 1.0) {
-      _climb_timer.reset();
-      _climb_settled_since.reset();
-      _mode.startRelay();
-      finishTakeoff(true, "at takeoff height; relaying");
-      return;
-    }
-  } else {
-    _climb_settled_since.reset();
+  // NED: up is negative z. Same 0.2 m margin as drogue_flight.
+  constexpr float kTakeoffHandoverMargin = 0.2f;
+  if (_mode.position().z() <= _climb_target.z() + kTakeoffHandoverMargin) {
+    handOverFromPx4Takeoff("within 0.2 m of the takeoff height");
+    return;
   }
   if ((_node.now() - _takeoff_started).seconds() > _takeoff_timeout_s) {
-    _climb_timer.reset();
-    _climb_settled_since.reset();
+    _px4_takeoff_running = false;
+    _takeoff_watch_timer.reset();
     finishTakeoff(false, "did not reach takeoff height in time");
     landNow("takeoff timed out");
+  }
+}
+
+void MissionExecutor::handOverFromPx4Takeoff(const std::string &how) {
+  _px4_takeoff_running = false;
+  _takeoff_watch_timer.reset();
+  RCLCPP_INFO(_node.get_logger(),
+              "Takeoff: %s at z=%.2f; settling at z=%.2f in the mission mode",
+              how.c_str(), _mode.position().z(), _climb_target.z());
+  // As drogue_flight does: scheduling our mode ends PX4's takeoff, and the
+  // takeoff is done there and then. The relay starts out holding the requested
+  // height, so the last few cm are climbed under the mission's own control
+  // while its next step already runs. (Waiting for the drone to settle within
+  // 0.1 m first never finished on the real vehicle.)
+  _mode.beginClimb(_climb_target);
+  scheduleMode(ownedMode().id(), [this](px4_ros2::Result relay_result) {
+    onScheduledModeResult(relay_result);
+  });
+  if (isInCharge() && !_landing) {
+    _mode.startRelay();
+    finishTakeoff(true, "took over from PX4's takeoff; relaying");
+  } else {
+    finishTakeoff(false, "could not take over from PX4's takeoff");
   }
 }
 
@@ -585,7 +588,8 @@ void MissionExecutor::onLand(std::shared_ptr<rmw_request_id_t> header,
   finishArm(false, "cancelled by land");
   if (_takeoff_request) {
     finishTakeoff(false, "cancelled by land");
-    _climb_timer.reset();
+    _takeoff_watch_timer.reset();
+    _px4_takeoff_running = false;
     _takeoff_aborted = true;
   }
   if (!isArmed()) {

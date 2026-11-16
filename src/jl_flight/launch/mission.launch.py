@@ -4,6 +4,7 @@ perception helpers it declares, and the mission itself.
     ros2 launch jl_flight mission.launch.py mission:=missions/land_before_apriltag.py
     ros2 launch jl_flight mission.launch.py mission:=... airframe:=x500_rgbd respawn:=true
     ros2 launch jl_flight mission.launch.py mission:=... report:=0.5     # fly, and print setpoints
+    ros2 launch jl_flight mission.launch.py mission:=... mode_slot:=7    # always register as ext7
 
 The mission waits for its mode to be selected, flies, and exits. With
 respawn:=true (the boot service) it restarts afterwards and waits for the
@@ -30,6 +31,7 @@ def _nodes(context):
     airframe = get_airframe(LaunchConfiguration("airframe").perform(context) or None)
     respawn = LaunchConfiguration("respawn").perform(context).lower() == "true"
     report = LaunchConfiguration("report").perform(context)
+    mode_slot = int(LaunchConfiguration("mode_slot").perform(context) or 0)
     spec = load(path)
     spec.check(airframe)
 
@@ -44,7 +46,7 @@ def _nodes(context):
             executable="jl_mission",
             name=f"jl_mission_{spec.name.lower()}",
             output="screen",
-            parameters=[{"mission_name": spec.name}],
+            parameters=[{"mission_name": spec.name, "mode_slot": mode_slot}],
         ),
         ExecuteProcess(
             cmd=runner,
@@ -76,6 +78,11 @@ def generate_launch_description():
                 "report",
                 default_value="",
                 description="print the setpoint, drone and targets every this many seconds",
+            ),
+            DeclareLaunchArgument(
+                "mode_slot",
+                default_value="0",
+                description="insist on this external-mode slot, e.g. 7 for ext7 (0: any)",
             ),
             DeclareLaunchArgument(
                 "respawn",
