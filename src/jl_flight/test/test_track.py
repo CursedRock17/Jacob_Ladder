@@ -136,3 +136,27 @@ def test_speed_and_tolerance_must_be_positive():
 
 def test_track_needs_a_target():
     assert Track.needs_target
+
+
+def test_the_setpoint_waits_for_a_drone_that_is_not_following():
+    # The drone is held still (a jl_mission hold, wind, a VIO jump): the
+    # reference must not run on toward the standoff and out of jl_mission's
+    # max_step_m, or every later setpoint is rejected.
+    track = make()
+    out = None
+    for _ in range(2000):  # 40 s at 0.5 m/s would carry it 7 m to the standoff
+        out = track.step(ctx((0.0, 0.0, -2.0)))
+    assert math.dist(out.position, (0.0, 0.0, -2.0)) <= 1.0 + 0.5 * 0.02 + 1e-9
+
+
+def test_after_a_position_jump_the_setpoint_restarts_near_the_drone():
+    track = make()
+    for _ in range(100):
+        track.step(ctx((0.0, 0.0, -2.0)))
+    out = track.step(ctx((5.0, 4.0, -2.0)))  # the estimate jumped 6.4 m
+    assert math.dist(out.position, (5.0, 4.0, -2.0)) <= 1.0 + 0.5 * 0.02 + 1e-9
+
+
+def test_max_lead_must_be_positive():
+    with pytest.raises(ValueError):
+        make(max_lead=0.0)

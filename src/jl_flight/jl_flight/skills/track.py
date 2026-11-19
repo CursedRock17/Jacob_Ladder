@@ -16,7 +16,10 @@ needed here: the reference itself is speed-limited.)
 
 Done once the drone has settled at the standoff, within `tolerance` on every
 axis and nearly still for `settle` seconds, so the final standoff comes from
-detections taken at rest, which camera latency does not bias. With
+detections taken at rest, which camera latency does not bias. The reference never
+runs more than `max_lead` ahead of the drone, so a drone that is held back
+(by jl_mission, wind, or a position jump) is waited for rather than left
+behind by a setpoint jl_mission would reject. With
 `keep_station` it never finishes, and keeps re-tracking a moving target.
 Failed once the target has been lost for `lost_after`; while it is lost the
 drone holds where it is.
@@ -51,6 +54,11 @@ class Track(Skill):
 
     standoff: float = 3.0  # m kept back from the target
     max_speed: float = 0.5  # m/s the setpoint moves at
+    # m the setpoint may run ahead of the drone. Without it the reference kept
+    # moving whether or not the drone followed (a hold in jl_mission, wind, a
+    # VIO position jump), ran up to jl_mission's max_step_m (5 m) and was then
+    # rejected on every tick, so the drone sat holding with no way to recover.
+    max_lead: float = 1.0
     tolerance: float = 0.25  # m per NED axis counted as arrived
     settle: float = 0.5  # s the drone must stay arrived and nearly still
     keep_station: bool = (
@@ -62,6 +70,8 @@ class Track(Skill):
             raise ValueError("standoff must be > 0, or the drone flies into the target")
         if min(self.max_speed, self.tolerance) <= 0 or self.settle < 0:
             raise ValueError("max_speed and tolerance must be > 0, and settle >= 0")
+        if self.max_lead <= 0:
+            raise ValueError("max_lead must be > 0")
         self.reset()
 
     def reset(self) -> None:
@@ -95,6 +105,11 @@ class Track(Skill):
             yaw = math.atan2(target[1] - here[1], target[0] - here[0])
 
         ref = here if self._ref is None else self._ref
+        # Keep the reference within max_lead of the drone: if the drone is not
+        # following, the setpoint waits for it instead of running away.
+        lead = sub(ref, here)
+        if norm(lead) > self.max_lead:
+            ref = add(here, scale(lead, self.max_lead / norm(lead)))
         to_go = sub(self._standoff, ref)
         distance = norm(to_go)
         step = self.max_speed * ctx.dt

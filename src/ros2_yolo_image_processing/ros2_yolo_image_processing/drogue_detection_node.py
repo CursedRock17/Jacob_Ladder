@@ -3,7 +3,12 @@ import os
 import rclpy
 from rclpy.node import Node
 from rclpy.executors import MultiThreadedExecutor
-from rclpy.qos import qos_profile_system_default, qos_profile_sensor_data
+from rclpy.qos import (
+    HistoryPolicy,
+    QoSProfile,
+    ReliabilityPolicy,
+    qos_profile_system_default,
+)
 from ament_index_python.packages import get_package_share_directory, PackageNotFoundError
 
 # MSG Libraries
@@ -120,7 +125,15 @@ class DrogueDetectionNode(Node):
         self.dnn_model = YOLO(self.MODEL_FILEPATH)
 
         # Create a valid Quality of Service
-        sensor_qos = qos_profile_sensor_data
+        # Keep only the newest frame. Callbacks in the default (mutually
+        # exclusive) group never overlap, so the _busy flag below never drops
+        # anything; with sensor_data's depth of 5, YOLO at ~13 FPS worked
+        # through a queue of stale frames, adding up to ~0.4 s of latency.
+        sensor_qos = QoSProfile(
+            history=HistoryPolicy.KEEP_LAST,
+            depth=1,
+            reliability=ReliabilityPolicy.BEST_EFFORT,
+        )
         default_qos = qos_profile_system_default
 
         # ROS 2 parameters for runtime tuning
@@ -280,7 +293,11 @@ class DrogueDetectionNode(Node):
                 )
 
         # Convert annotated image to ROS message
-        annotated_msg = self.opencv_bridge.cv2_to_imgmsg(annotated_img, encoding="rgb8")
+        # Same channel order as the camera gave us (the RealSense via VIO is
+        # bgr8): hard-coding rgb8 swapped red and blue in the viewer.
+        annotated_msg = self.opencv_bridge.cv2_to_imgmsg(
+            annotated_img, encoding=img_msg.encoding
+        )
         annotated_msg.header = img_msg.header
 
         return detections, annotated_msg

@@ -353,6 +353,20 @@ class PoseEstimationNode(Node):
             self.get_logger().warn("No drogue or coupler detected")
             return
 
+        # ranging_function returns all zeros for a degenerate (<= 1 px) box.
+        # Publishing that would put the target at the camera lens.
+        if pose_data[2] <= 0.0:
+            return
+
+        # The range, once a second, so it can be read off the mission's terminal
+        # without a report or a topic echo.
+        self.get_logger().info(
+            f"{target} {pose_data[3]:.2f} m away "
+            f"(forward {pose_data[2]:.2f}, left {pose_data[0]:+.2f}, "
+            f"up {pose_data[1]:+.2f})",
+            throttle_duration_sec=1.0,
+        )
+
         # Create and publish pose message
         pose_msg = PoseStamped()
         pose_msg.header = detections_msg.header

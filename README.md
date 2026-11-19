@@ -196,7 +196,7 @@ commands, skills, perception and airframes.
 | `takeoff_hold_land.py` | Take off, hover 5 s, land |
 | `square.py`, `hover_5s.py` | Examples: relative moves, and a hand-written setpoint loop |
 | `land_before_apriltag.py` | Fly to 1.5 m short of an AprilTag on a wall, facing it, and land there |
-| `drogue_approach.py` | Close to 3 m behind the refuelling drogue (YOLO) and hold station: drogue_flight's `DroneSmoothPlanner` in Python |
+| `drogue_approach.py` | Close to 3 m behind the refuelling drogue (YOLO) and land once settled within 0.1 m: drogue_flight's `DroneSmoothPlanner` in Python |
 | `apriltag_approach.py` | The same with an AprilTag standing in for the drogue (the simulator) |
 | `aruco_standoff.py`, `track_moving_aruco.py` | The same with ArUco tags, the second with a PID controller |
 

@@ -32,8 +32,8 @@ class Airframe:
 
 
 # The names a realsense2_camera driver publishes, which the simulated camera copies.
-REALSENSE_IMAGE = "/camera/color/image_raw"
-REALSENSE_INFO = "/camera/color/camera_info"
+REALSENSE_IMAGE = "/front/camera/image_raw"
+REALSENSE_INFO = "/front/camera/camera_info"
 
 # A forward camera at the vehicle origin: right for a first look, wrong for
 # precise work, because the lever arm is ignored. Define your own airframe.

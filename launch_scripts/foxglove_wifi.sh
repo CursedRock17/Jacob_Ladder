@@ -25,7 +25,11 @@ JPEG_QUALITY="${JPEG_QUALITY:-60}"
 cleanup() { kill 0 2>/dev/null; }
 trap cleanup EXIT
 
-# YOLO annotated output (the 15-20 Hz drogue view)
+# YOLO annotated output (the 15-20 Hz drogue view). The drogue missions
+# (missions/drogue_approach.py, YoloDrogue) start drogue_detection_node, which
+# publishes this as /detections_image. It only appears once the mission's
+# service is running and YOLO has loaded; the republisher picks it up whenever
+# it does, so this script can be started first.
 ros2 run image_transport republish raw compressed --ros-args \
     -r __node:=republish_detections_image \
     -r in:=/detections_image \
@@ -54,6 +58,7 @@ ros2 launch foxglove_bridge foxglove_bridge_launch.xml \
     num_threads:=4 \
     topic_whitelist:="['.*/compressed$', \
 '/detections', '/vision_info', '/tag_detections', \
+'/jl/perception/.*', \
 '/drogue.*', '/slam/.*', '.*/state$', '.*/diagnostics$', '/tf', '/tf_static', \
 '/fmu/out/.*', '/imu/data', \
 '/front/camera/camera_info', \

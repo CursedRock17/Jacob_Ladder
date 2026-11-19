@@ -59,9 +59,8 @@ def fly(name: str, **pilot) -> Pilot:
     return backend
 
 
-@pytest.mark.parametrize("name", ["apriltag_approach.py", "drogue_approach.py"])
-def test_the_approach_holds_3_m_short_until_the_pilot_takes_over(name: str) -> None:
-    b = fly(name)
+def test_the_approach_holds_3_m_short_until_the_pilot_takes_over() -> None:
+    b = fly("apriltag_approach.py")
     north, east, down = b.position
     assert north == pytest.approx(TARGET[0] - 3.0, abs=0.25)
     assert east == pytest.approx(0.0, abs=0.2)
@@ -70,24 +69,36 @@ def test_the_approach_holds_3_m_short_until_the_pilot_takes_over(name: str) -> N
     assert len(b.calls) == 2  # the pilot has it now: no landing
 
 
-def test_the_drogue_is_followed_as_it_moves_away() -> None:
-    b = fly("drogue_approach.py", drift=(1.0, 0.0))
+def test_the_drogue_approach_lands_3_m_short() -> None:
+    b = fly("drogue_approach.py", takeover_at=math.inf)
+    assert [c.split()[0] for c in b.calls] == ["connect", "takeoff", "land"]
+    assert "at the standoff: landing" in b.events
+    north, east, _ = b.position
+    assert north == pytest.approx(TARGET[0] - 3.0, abs=0.1)
+    assert east == pytest.approx(0.0, abs=0.1)
+
+
+def test_the_target_is_followed_as_it_moves_away() -> None:
+    b = fly("apriltag_approach.py", drift=(1.0, 0.0))
     assert b.position[0] == pytest.approx(TARGET[0] + 1.0 - 3.0, abs=0.25)
 
 
-def test_a_drogue_moving_sideways_is_held_on_the_same_ring_and_faced() -> None:
+def test_a_target_moving_sideways_is_held_on_the_same_ring_and_faced() -> None:
     # Like DroneSmoothPlanner: the standoff is measured along the drone's own line
     # to the target, so the drone turns to face it rather than sliding with it.
-    b = fly("drogue_approach.py", drift=(0.0, 1.0))
+    b = fly("apriltag_approach.py", drift=(0.0, 1.0))
     north, east, _ = b.position
     assert math.hypot(TARGET[0] - north, 1.0 - east) == pytest.approx(3.0, abs=0.25)
     bearing = math.degrees(math.atan2(1.0 - east, TARGET[0] - north))
     assert math.degrees(b.yaw) == pytest.approx(bearing, abs=5)
 
 
-@pytest.mark.parametrize("name", ["apriltag_approach.py", "drogue_approach.py"])
-def test_losing_the_target_lands(name: str) -> None:
-    b = fly(name, hide_at=30.0)
+# Hidden before the drogue approach can settle and land on its own.
+@pytest.mark.parametrize(
+    ("name", "hide_at"), [("apriltag_approach.py", 30.0), ("drogue_approach.py", 2.0)]
+)
+def test_losing_the_target_lands(name: str, hide_at: float) -> None:
+    b = fly(name, hide_at=hide_at)
     assert b.calls[-1] == "land"
     assert any(e.startswith("lost the") for e in b.events)
 
