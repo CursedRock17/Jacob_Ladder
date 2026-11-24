@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+from dataclasses import fields, is_dataclass
+
 import pytest
 
-from jl_blocks.core import Controller, Mission, Registry, Target, block
+from jl_blocks.core import Block, Controller, Mission, Registry, Target, block
 
 
 def test_decorator_registers_block_under_its_name():
@@ -40,6 +42,16 @@ def test_block_uses_default_params_when_none_given(registry):
     goto = registry.get("goto")
     assert goto is not None
     assert goto().params.x == 1.0
+
+
+def test_base_block_params_are_empty_independent_dataclass_instances():
+    first = Block()
+    second = Block()
+
+    assert isinstance(first.params, Block.Params)
+    assert is_dataclass(first.params)
+    assert fields(first.params) == ()
+    assert first.params is not second.params
 
 
 def test_target_default_lost_after_is_three_seconds():

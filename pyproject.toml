@@ -91,6 +91,9 @@ extend-exclude = [
     "src/Micro-XRCE-DDS-Agent",
 ]
 
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F", "B006", "B008", "B012", "B016", "B904"]
+
 [tool.ruff.lint.per-file-ignores]
 # ROS 2 launch files stage optional nodes/config as commented-out
 # LaunchDescription entries (e.g. "# ros2bag_node,"), leaving their builder
